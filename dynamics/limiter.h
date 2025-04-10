@@ -1,8 +1,10 @@
 #pragma once
+#include <algorithm>
 #include <cmath>
 
 namespace PlayfulTones::DspToolBox
 {
+    static constexpr auto kSmallValue = 1e-6f;
     /*
         * Apply a simple limiter to the audio buffer.
         * This function applies a hard limiter to the audio samples in the buffer.
@@ -16,18 +18,16 @@ namespace PlayfulTones::DspToolBox
     */
     static inline void applyLimiter (float** buffer, int numChannels, int numFrames, float threshold = 1.f, float ceiling = 1.f)
     {
-        for (int i = 0; i < numFrames; i++)
+        for (int ch = 0; ch < numChannels; ch++)
         {
-            for (int ch = 0; ch < numChannels; ch++)
-            {
-                float sample = buffer[ch][i];
-                float absValue = std::abs (sample);
+            float* channelBuffer = buffer[ch];
 
-                if (absValue > threshold)
-                {
-                    float gainReduction = ceiling / absValue;
-                    buffer[ch][i] = sample * gainReduction;
-                }
+            for (int i = 0; i < numFrames; i++)
+            {
+                float sample = channelBuffer[i];
+                float absValue = std::abs (sample);
+                float gainReduction = std::min (1.0f, ceiling / (absValue + kSmallValue));
+                channelBuffer[i] = sample * gainReduction;
             }
         }
     }
