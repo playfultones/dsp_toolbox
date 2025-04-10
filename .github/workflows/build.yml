@@ -1,0 +1,30 @@
+name: Build Validation
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - uses: actions/checkout@v4
+      
+    - name: Build and Test (Windows)
+      if: ${{ matrix.os == 'windows-latest' }}
+      shell: cmd
+      run: build.bat
+      
+    - name: Build and Test (macOS/Linux)
+      if: ${{ matrix.os != 'windows-latest' }}
+      shell: bash
+      run: |
+        chmod +x ./build.sh
+        ./build.sh
