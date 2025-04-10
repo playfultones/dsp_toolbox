@@ -7,9 +7,9 @@ cd build
 
 :: Configure and build
 cmake ..
-cmake --build .
+cmake --build . --config Debug
 
-:: Run tests
-ctest --output-on-failure
+:: Run tests with Debug configuration
+ctest --output-on-failure -C Debug
 
 if errorlevel 1 exit /b 1
