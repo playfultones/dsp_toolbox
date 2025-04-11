@@ -6,7 +6,7 @@ mkdir -p build
 cd build
 
 # Configure and build
-cmake ..
+cmake -G Ninja ..
 cmake --build .
 
 # Run tests
