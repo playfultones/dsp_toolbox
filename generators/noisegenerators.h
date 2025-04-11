@@ -13,7 +13,7 @@ namespace PlayfulTones::DspToolBox
         * @param numFrames The number of frames in the audio buffer.
         * @param gain The gain factor to apply to the generated noise. Default is 1.0f.
     */
-    static inline void generateWhiteNoise (float** buffer, int numChannels, int numFrames, float gain = 1.f)
+    inline void generateWhiteNoise (float** buffer, int numChannels, int numFrames, float gain = 1.f)
     {
         static std::random_device rd;
         static std::mt19937 gen (rd());
