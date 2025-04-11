@@ -17,7 +17,7 @@ namespace PlayfulTones::DspToolBox
         * @param threshold The threshold above which samples will be limited. Default is 1.0f.
         * @param ceiling The maximum allowed amplitude after limiting. Default is 1.0f.
     */
-    static inline void applyLimiter (float** buffer, int numChannels, int numFrames, float threshold = 1.f, float ceiling = 1.f)
+    inline void applyLimiter (float** buffer, int numChannels, int numFrames, float threshold = 1.f, float ceiling = 1.f)
     {
         for (int ch = 0; ch < numChannels; ch++)
         {
