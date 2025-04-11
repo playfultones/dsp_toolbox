@@ -70,7 +70,7 @@ namespace PlayfulTones::DspToolBox
 
                 for (int ch = 0; ch < numChannels; ch++)
                 {
-                    buffer[ch][i] *= envValue;
+                    buffer[ch][i] *= static_cast<float> (envValue);
                 }
             }
         }
