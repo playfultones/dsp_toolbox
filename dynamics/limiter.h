@@ -4,6 +4,7 @@
 
 namespace PlayfulTones::DspToolBox
 {
+    static constexpr auto kNoReduction = 1.0f;
     static constexpr auto kSmallValue = 1e-6f;
     /*
         * Apply a simple limiter to the audio buffer.
@@ -26,7 +27,7 @@ namespace PlayfulTones::DspToolBox
             {
                 float sample = channelBuffer[i];
                 float absValue = std::abs (sample);
-                float gainReduction = std::min (1.0f, ceiling / (absValue + kSmallValue));
+                float gainReduction = std::min (kNoReduction, ceiling / (absValue + kSmallValue));
                 channelBuffer[i] = sample * gainReduction;
             }
         }
