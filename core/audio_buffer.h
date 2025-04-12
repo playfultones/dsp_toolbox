@@ -1,4 +1,5 @@
 #pragma once
+#include "buffer_view.h"
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
@@ -49,6 +50,8 @@ namespace PlayfulTones::DspToolBox
                 data[ch].resize (newNumFrames, 0.0f);
                 channelPointers[ch] = data[ch].data();
             }
+
+            view.setData (channelPointers.data(), newNumChannels, newNumFrames);
         }
 
         /**
@@ -64,13 +67,13 @@ namespace PlayfulTones::DspToolBox
          * @brief Get the number of channels
          * @return Number of channels
          */
-        int getNumChannels() const { return static_cast<int> (data.size()); }
+        int getNumChannels() const { return view.getNumChannels(); }
 
         /**
          * @brief Get the number of frames per channel
          * @return Number of frames per channel
          */
-        int getNumFrames() const { return data.empty() ? 0 : static_cast<int> (data[0].size()); }
+        int getNumFrames() const { return view.getNumFrames(); }
 
         /**
          * @brief Get write access to sample data for a channel
@@ -80,9 +83,7 @@ namespace PlayfulTones::DspToolBox
          */
         float* getChannelPointer (int channel)
         {
-            if (channel < 0 || channel >= getNumChannels())
-                throw std::out_of_range ("Channel index out of range");
-            return data[channel].data();
+            return view.getChannelPointer (channel);
         }
 
         /**
@@ -93,9 +94,7 @@ namespace PlayfulTones::DspToolBox
          */
         const float* getChannelPointer (int channel) const
         {
-            if (channel < 0 || channel >= getNumChannels())
-                throw std::out_of_range ("Channel index out of range");
-            return data[channel].data();
+            return view.getChannelPointer (channel);
         }
 
         /**
@@ -104,7 +103,7 @@ namespace PlayfulTones::DspToolBox
          */
         float** getArrayOfChannels()
         {
-            return channelPointers.data();
+            return view.getArrayOfChannels();
         }
 
         /**
@@ -113,11 +112,12 @@ namespace PlayfulTones::DspToolBox
          */
         float* const* getArrayOfChannels() const
         {
-            return channelPointers.data();
+            return view.getArrayOfChannels();
         }
 
     private:
         std::vector<std::vector<float>> data;
         std::vector<float*> channelPointers; // Cache of data pointers for efficient access
+        BufferView view;
     };
 } // namespace PlayfulTones::DspToolBox
