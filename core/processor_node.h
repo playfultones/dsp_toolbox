@@ -1,5 +1,6 @@
 #pragma once
 #include "processor.h"
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <mutex>
