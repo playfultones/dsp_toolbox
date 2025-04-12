@@ -63,12 +63,8 @@ namespace PlayfulTones::DspToolBox
 
             std::lock_guard<std::mutex> lock (modificationMutex);
 
-            // Get the inactive buffer and modify it
-            auto* current = currentInputs.load();
-            auto* inactive = (current == &inputs[0]) ? &inputs[1] : &inputs[0];
-
-            // Copy current connections to inactive buffer
-            *inactive = *current;
+            auto* inactive = getInactiveBuffer();
+            *inactive = *currentInputs.load();
 
             // Modify inactive buffer
             inactive->push_back (input);
@@ -84,10 +80,8 @@ namespace PlayfulTones::DspToolBox
 
             std::lock_guard<std::mutex> lock (modificationMutex);
 
-            auto* current = currentInputs.load();
-            auto* inactive = (current == &inputs[0]) ? &inputs[1] : &inputs[0];
-
-            *inactive = *current;
+            auto* inactive = getInactiveBuffer();
+            *inactive = *currentInputs.load();
 
             inactive->erase (
                 std::remove (inactive->begin(), inactive->end(), input),
@@ -100,8 +94,7 @@ namespace PlayfulTones::DspToolBox
         {
             std::lock_guard<std::mutex> lock (modificationMutex);
 
-            auto* current = currentInputs.load();
-            auto* inactive = (current == &inputs[0]) ? &inputs[1] : &inputs[0];
+            auto* inactive = getInactiveBuffer();
 
             inactive->clear();
 
@@ -109,6 +102,12 @@ namespace PlayfulTones::DspToolBox
         }
 
     private:
+        ProcessorNode::VectorPtr getInactiveBuffer()
+        {
+            auto* current = currentInputs.load();
+            return (current == &inputs[0]) ? &inputs[1] : &inputs[0];
+        }
+
         std::unique_ptr<Processor> processor;
 
         // Double-buffered connections
