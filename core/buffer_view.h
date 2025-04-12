@@ -11,17 +11,17 @@ namespace PlayfulTones::DspToolBox
      * by another entity. It provides similar interface to AudioBuffer but doesn't
      * manage memory itself.
      */
-    class BufferView
+    struct BufferView
     {
     public:
         /**
-         * @brief Construct a buffer view with existing audio data
+         * @brief Set the data for the buffer view
          * @param buffer Array of pointers to channel data
          * @param numChannels Number of audio channels
          * @param numFrames Number of frames per channel
          * @throws std::invalid_argument if dimensions are invalid or buffer is null
          */
-        BufferView (float** buffer, int numChannels, int numFrames)
+        void setData (float** buffer, int numChannels, int numFrames)
         {
             if (buffer == nullptr)
                 throw std::invalid_argument ("Buffer pointer cannot be null");
