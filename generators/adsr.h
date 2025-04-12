@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/processor.h"
 
 namespace PlayfulTones::DspToolBox
 {
@@ -8,20 +9,20 @@ namespace PlayfulTones::DspToolBox
      * This class implements a simple ADSR (Attack, Decay, Sustain, Release) envelope generator.
      * It can be used to shape the amplitude of audio signals over time.
      */
-    class ADSR
+    class ADSR : public Processor
     {
     public:
         ADSR() = default;
 
         ~ADSR() = default;
 
-        void prepare (double sampleRate)
+        void prepare (double sampleRate, int /*maxFramesPerBlock*/) override
         {
-            sr = sampleRate;
+            setSampleRate (sampleRate);
             reset();
         }
 
-        void reset()
+        void reset() override
         {
             currentValue = 0.0;
             currentState = State::Idle;
@@ -30,12 +31,12 @@ namespace PlayfulTones::DspToolBox
 
         void setAttack (double attackTimeInSeconds)
         {
-            attackSamples = attackTimeInSeconds * sr;
+            attackSamples = attackTimeInSeconds * getSampleRate();
         }
 
         void setDecay (double decayTimeInSeconds)
         {
-            decaySamples = decayTimeInSeconds * sr;
+            decaySamples = decayTimeInSeconds * getSampleRate();
         }
 
         void setSustain (double sustainLevel)
@@ -45,7 +46,7 @@ namespace PlayfulTones::DspToolBox
 
         void setRelease (double releaseTimeInSeconds)
         {
-            releaseSamples = releaseTimeInSeconds * sr;
+            releaseSamples = releaseTimeInSeconds * getSampleRate();
         }
 
         void noteOn()
@@ -62,7 +63,7 @@ namespace PlayfulTones::DspToolBox
             releaseStartValue = currentValue;
         }
 
-        void process (float** buffer, int numChannels, int numFrames)
+        void process (float** buffer, int numChannels, int numFrames) override
         {
             for (int i = 0; i < numFrames; i++)
             {
@@ -140,7 +141,6 @@ namespace PlayfulTones::DspToolBox
             return currentValue;
         }
 
-        double sr = 44100.0;
         double attackSamples = 0.0;
         double decaySamples = 0.0;
         double sustainValue = 1.0;
