@@ -8,12 +8,6 @@
 
 namespace PlayfulTones::DspToolBox
 {
-    namespace detail
-    {
-        static_assert (std::atomic<ProcessorNode::VectorPtr>::is_always_lock_free,
-            "std::atomic<vector<ProcessorNode::Ptr>*> must be lock-free for real-time audio processing");
-    }
-
     class ProcessorNode : public Processor
     {
     public:
@@ -121,5 +115,8 @@ namespace PlayfulTones::DspToolBox
         std::atomic<ProcessorNode::VectorPtr> currentInputs;
 
         std::mutex modificationMutex;
+
+        static_assert (std::atomic<ProcessorNode::VectorPtr>::is_always_lock_free,
+            "std::atomic<vector<ProcessorNode::Ptr>*> must be lock-free for real-time audio processing");
     };
 }
