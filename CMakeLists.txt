@@ -5,7 +5,7 @@ project(dsp_toolbox VERSION 1.0.0 LANGUAGES CXX)
 enable_testing()
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
