@@ -21,6 +21,11 @@ add_executable(test_processor_chain tests/test_processor_chain.cpp)
 target_include_directories(test_processor_chain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME processor_chain_test COMMAND test_processor_chain)
 
+# Add buffer validators test
+add_executable(test_buffer_validators tests/test_buffer_validators.cpp)
+target_include_directories(test_buffer_validators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME buffer_validators_test COMMAND test_buffer_validators)
+
 # Find all header files
 file(GLOB_RECURSE HEADER_FILES "**/*.h")
 
