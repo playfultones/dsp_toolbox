@@ -1,6 +1,7 @@
 #include "core/processor_chain.h"
 #include "dynamics/gain.h"
 #include "generators/noisegenerators.h"
+#include "validators/buffer_validators.h"
 #include <cassert>
 #include <iostream>
 #include <memory>
@@ -40,37 +41,23 @@ void testBasicSignalFlow()
     // Fill buffer with white noise
     generateWhiteNoise (buffer.data(), numChannels, numFrames, 1.0f);
 
-    // Store original buffer
-    std::vector<std::vector<float>> originalData (numChannels);
+    // Create expected buffer with gain applied
+    std::vector<std::vector<float>> expectedData (numChannels);
+    std::vector<float*> expectedBuffer (numChannels);
     for (int ch = 0; ch < numChannels; ++ch)
     {
-        originalData[ch].resize (numFrames);
-        std::copy (audioData[ch].begin(), audioData[ch].end(), originalData[ch].begin());
+        expectedData[ch].resize (numFrames);
+        expectedBuffer[ch] = expectedData[ch].data();
+        // Copy and apply gain
+        for (int i = 0; i < numFrames; ++i)
+            expectedData[ch][i] = audioData[ch][i] * kGain;
     }
 
     // Process
     chain.process (buffer.data(), numChannels, numFrames);
 
-    // Verify gain was applied correctly to all samples
-    bool allSamplesCorrect = true;
-    for (int ch = 0; ch < numChannels; ++ch)
-    {
-        for (int i = 0; i < numFrames; ++i)
-        {
-            float expectedValue = originalData[ch][i] * kGain;
-            if (std::abs (audioData[ch][i] - expectedValue) > 0.000001f)
-            {
-                std::cout << "Mismatch at channel " << ch << ", frame " << i
-                          << ". Expected: " << expectedValue
-                          << ", Got: " << audioData[ch][i] << std::endl;
-                allSamplesCorrect = false;
-                break;
-            }
-        }
-        if (!allSamplesCorrect)
-            break;
-    }
-
+    // Verify gain was applied correctly using the buffer validator
+    bool allSamplesCorrect = compareAudioBuffers (buffer.data(), expectedBuffer.data(), numChannels, numFrames);
     assert (allSamplesCorrect && "All samples should be exactly half of the original values");
     std::cout << "Basic signal flow test passed for 1 second of audio!" << std::endl;
 }
