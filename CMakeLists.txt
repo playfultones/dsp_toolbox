@@ -16,22 +16,27 @@ else()
     add_compile_options(-Wall -Wextra -Werror -pedantic)
 endif()
 
+# Add processor chain test
+add_executable(test_processor_chain tests/test_processor_chain.cpp)
+target_include_directories(test_processor_chain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME processor_chain_test COMMAND test_processor_chain)
+
 # Find all header files
 file(GLOB_RECURSE HEADER_FILES "**/*.h")
 
-# Create test executable for each header
+# Create compilation test executable for each header
 foreach(HEADER ${HEADER_FILES})
     # Get the filename without extension
     get_filename_component(TEST_NAME ${HEADER} NAME_WE)
     
     # Create a test source file that includes the header
-    set(TEST_SOURCE "${CMAKE_BINARY_DIR}/test_${TEST_NAME}.cpp")
+    set(TEST_SOURCE "${CMAKE_BINARY_DIR}/compilationtest_${TEST_NAME}.cpp")
     file(WRITE ${TEST_SOURCE} "#include \"${HEADER}\"\nint main() { return 0; }\n")
     
     # Add executable
-    add_executable(test_${TEST_NAME} ${TEST_SOURCE})
-    target_include_directories(test_${TEST_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_executable(compilationtest_${TEST_NAME} ${TEST_SOURCE})
+    target_include_directories(compilationtest_${TEST_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     
     # Add test
-    add_test(NAME ${TEST_NAME}_compiles COMMAND test_${TEST_NAME})
+    add_test(NAME ${TEST_NAME}_compiles COMMAND compilationtest_${TEST_NAME})
 endforeach()
