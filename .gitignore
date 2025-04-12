@@ -36,3 +36,4 @@ build/
 
 # VSCode settings
 .vscode/
+.aider*
