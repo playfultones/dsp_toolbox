@@ -28,8 +28,11 @@ namespace PlayfulTones::DspToolBox
             currentRampSample_ = 0;
         }
 
-        void process (float** buffer, int numChannels, int numFrames) override
+        void process (BufferView& buffer) override
         {
+            const auto numFrames = buffer.getNumFrames();
+            const auto numChannels = buffer.getNumChannels();
+
             if (rampLengthSamples_ > 0 && currentRampSample_ < rampLengthSamples_)
             {
                 // Process with gain ramping
@@ -44,18 +47,19 @@ namespace PlayfulTones::DspToolBox
 
                     for (int ch = 0; ch < numChannels; ++ch)
                     {
-                        buffer[ch][i] *= gain_;
+                        buffer.getChannelPointer (ch)[i] *= gain_;
                     }
                 }
             }
             else
             {
                 // Process without ramping
-                for (int i = 0; i < numFrames; ++i)
+                for (int ch = 0; ch < numChannels; ++ch)
                 {
-                    for (int ch = 0; ch < numChannels; ++ch)
+                    auto* channelData = buffer.getChannelPointer (ch);
+                    for (int i = 0; i < numFrames; ++i)
                     {
-                        buffer[ch][i] *= gain_;
+                        channelData[i] *= gain_;
                     }
                 }
             }

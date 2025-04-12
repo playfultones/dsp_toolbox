@@ -1,4 +1,5 @@
 #pragma once
+#include "buffer_view.h"
 
 namespace PlayfulTones::DspToolBox
 {
@@ -21,12 +22,23 @@ namespace PlayfulTones::DspToolBox
         virtual void prepare (double sampleRate, int maxFramesPerBlock) = 0;
 
         /**
-         * @brief Process audio data.
+         * @brief Process audio data using BufferView.
+         * @param buffer The buffer view containing the audio data to process.
+         */
+        virtual void process (BufferView& buffer) = 0;
+
+        /**
+         * @brief Legacy process function for backward compatibility.
          * @param buffer Array of audio channel data.
          * @param numChannels Number of channels in the buffer.
          * @param numFrames Number of frames to process.
          */
-        virtual void process (float** buffer, int numChannels, int numFrames) = 0;
+        void process (float** buffer, int numChannels, int numFrames)
+        {
+            BufferView view;
+            view.setData (buffer, numChannels, numFrames);
+            process (view);
+        }
 
         /**
          * @brief Reset the processor's internal state.

@@ -32,17 +32,17 @@ namespace PlayfulTones::DspToolBox
             }
         }
 
-        void process (float** buffer, int numChannels, int numFrames) override
+        void process (BufferView& buffer) override
         {
             auto* current = currentInputs.load (std::memory_order_acquire);
 
             for (auto& input : *current)
             {
                 if (input)
-                    input->process (buffer, numChannels, numFrames);
+                    input->process (buffer);
             }
 
-            processor->process (buffer, numChannels, numFrames);
+            processor->process (buffer);
         }
 
         void reset() override

@@ -63,15 +63,18 @@ namespace PlayfulTones::DspToolBox
             releaseStartValue = currentValue;
         }
 
-        void process (float** buffer, int numChannels, int numFrames) override
+        void process (BufferView& buffer) override
         {
+            const auto numFrames = buffer.getNumFrames();
+            const auto numChannels = buffer.getNumChannels();
+
             for (int i = 0; i < numFrames; i++)
             {
                 double envValue = processNextValue();
 
                 for (int ch = 0; ch < numChannels; ch++)
                 {
-                    buffer[ch][i] *= static_cast<float> (envValue);
+                    buffer.getChannelPointer (ch)[i] *= static_cast<float> (envValue);
                 }
             }
         }

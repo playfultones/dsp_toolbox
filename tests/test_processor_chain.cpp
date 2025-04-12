@@ -16,11 +16,9 @@ void testBasicSignalFlow()
     const double sampleRate = 44100.0;
     const int numFrames = static_cast<int> (sampleRate); // 1 second of audio
 
-    // Create audio buffer
-    std::vector<std::vector<float>> audioData (numChannels, std::vector<float> (numFrames, 0.0f));
-    std::vector<float*> buffer (numChannels);
-    for (int ch = 0; ch < numChannels; ++ch)
-        buffer[ch] = audioData[ch].data();
+    // Create audio buffers
+    AudioBuffer audioBuffer (numChannels, numFrames);
+    AudioBuffer expectedBuffer (numChannels, numFrames);
 
     // Create processing chain
     ProcessorChain chain;
@@ -39,25 +37,24 @@ void testBasicSignalFlow()
     chain.prepare (sampleRate, numFrames);
 
     // Fill buffer with white noise
-    generateWhiteNoise (buffer.data(), numChannels, numFrames, 1.0f);
+    generateWhiteNoise (audioBuffer.getArrayOfChannels(), numChannels, numFrames, 1.0f);
 
-    // Create expected buffer with gain applied
-    std::vector<std::vector<float>> expectedData (numChannels);
-    std::vector<float*> expectedBuffer (numChannels);
+    // Copy to expected buffer and apply gain
     for (int ch = 0; ch < numChannels; ++ch)
     {
-        expectedData[ch].resize (numFrames);
-        expectedBuffer[ch] = expectedData[ch].data();
-        // Copy and apply gain
+        const auto* srcData = audioBuffer.getChannelPointer (ch);
+        auto* dstData = expectedBuffer.getChannelPointer (ch);
         for (int i = 0; i < numFrames; ++i)
-            expectedData[ch][i] = audioData[ch][i] * kGain;
+            dstData[i] = srcData[i] * kGain;
     }
 
-    // Process
-    chain.process (buffer.data(), numChannels, numFrames);
+    // Process using BufferView
+    BufferView view;
+    view.setData (audioBuffer.getArrayOfChannels(), numChannels, numFrames);
+    chain.process (view);
 
     // Verify gain was applied correctly using the buffer validator
-    bool allSamplesCorrect = compareAudioBuffers (buffer.data(), expectedBuffer.data(), numChannels, numFrames);
+    bool allSamplesCorrect = compareAudioBuffers (audioBuffer, expectedBuffer);
     assert (allSamplesCorrect && "All samples should be exactly half of the original values");
     std::cout << "Basic signal flow test passed for 1 second of audio!" << std::endl;
 }

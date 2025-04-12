@@ -19,10 +19,10 @@ namespace PlayfulTones::DspToolBox
                 node->prepare (sampleRate, maxFramesPerBlock);
         }
 
-        void process (float** buffer, int numChannels, int numFrames) override
+        void process (BufferView& buffer) override
         {
             if (auto* node = outputNode.load (std::memory_order_acquire))
-                node->process (buffer, numChannels, numFrames);
+                node->process (buffer);
         }
 
         void reset() override
