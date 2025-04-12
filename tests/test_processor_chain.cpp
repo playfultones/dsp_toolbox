@@ -24,10 +24,12 @@ void testBasicSignalFlow()
     // Create processing chain
     ProcessorChain chain;
 
-    // Create a gain processor, configure it, then create the node
-    auto gainProc = std::make_unique<Gain>();
-    gainProc->setGain (kGain);
-    auto gainNode = chain.createNode<ProcessorNode> (std::move (gainProc));
+    // Create a gain processor node
+    auto gainNode = chain.createNode<Gain>();
+    if (auto* gain = gainNode->getProcessor<Gain>())
+        gain->setGain (kGain);
+    else
+        throw std::runtime_error ("Failed to get Gain processor");
 
     // Set as output node
     chain.setOutputNode (gainNode);

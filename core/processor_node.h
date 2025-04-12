@@ -101,6 +101,16 @@ namespace PlayfulTones::DspToolBox
             currentInputs.store (inactive, std::memory_order_release);
         }
 
+        Processor* getProcessor() { return processor.get(); }
+
+        template <typename T>
+        T* getProcessor()
+        {
+            if (auto* p = dynamic_cast<T*> (processor.get()))
+                return p;
+            return nullptr;
+        }
+
     private:
         ProcessorNode::VectorPtr getInactiveBuffer()
         {
