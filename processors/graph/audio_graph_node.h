@@ -1,3 +1,9 @@
+/*******************************************************************
+* Copyright         : 2025 Playful Tones
+* Author            : Bence Kovács
+* License           : GNU General Public License v3.0
+*******************************************************************/
+
 #pragma once
 #include "../processor.h"
 #include <memory>
@@ -19,6 +25,7 @@ namespace PlayfulTones::DspToolBox
         using Ptr = std::shared_ptr<AudioGraphNode>;
         using WeakPtr = std::weak_ptr<AudioGraphNode>;
         using Id = unsigned int;
+
     private:
         struct Connection
         {
@@ -27,27 +34,25 @@ namespace PlayfulTones::DspToolBox
         };
 
     public:
-        
         /**
          * @brief Construct a new AudioGraphNode
          * @param processor The processor to wrap
          */
-        AudioGraphNode(std::unique_ptr<Processor> processor)
-            : processor(std::move(processor))
-            , id(nextId++)
+        AudioGraphNode (std::unique_ptr<Processor> processor)
+            : processor (std::move (processor)), id (nextId++)
         {
         }
-        
+
         /**
          * @brief Get the unique ID of this node
          */
         Id getId() const { return id; }
-        
+
         /**
          * @brief Get the wrapped processor
          */
         Processor* getProcessor() { return processor.get(); }
-        
+
         /**
          * @brief Get the wrapped processor as a specific type
          * @tparam T The type to cast the processor to
@@ -56,9 +61,9 @@ namespace PlayfulTones::DspToolBox
         template <typename T>
         T* getProcessor()
         {
-            return dynamic_cast<T*>(processor.get());
+            return dynamic_cast<T*> (processor.get());
         }
-        
+
         /**
          * @brief Add an input connection from another node
          * @param sourceNode The source node
@@ -66,15 +71,15 @@ namespace PlayfulTones::DspToolBox
          * @param inputChannel The input channel on this node
          * @return True if the connection was successful
          */
-        bool addInputConnection(Ptr sourceNode, int outputChannel = 0, int inputChannel = 0)
+        bool addInputConnection (Ptr sourceNode, int outputChannel = 0, int inputChannel = 0)
         {
             if (!sourceNode)
                 return false;
-                
-            inputs[inputChannel].push_back({ sourceNode, outputChannel });
+
+            inputs[inputChannel].push_back ({ sourceNode, outputChannel });
             return true;
         }
-        
+
         /**
          * @brief Remove an input connection
          * @param sourceNode The source node to disconnect
@@ -82,23 +87,23 @@ namespace PlayfulTones::DspToolBox
          * @param inputChannel The input channel on this node
          * @return True if a connection was removed
          */
-        bool removeInputConnection(Ptr sourceNode, int outputChannel = 0, int inputChannel = 0)
+        bool removeInputConnection (Ptr sourceNode, int outputChannel = 0, int inputChannel = 0)
         {
             if (!sourceNode)
                 return false;
-                
+
             auto& connections = inputs[inputChannel];
             for (auto it = connections.begin(); it != connections.end(); ++it)
             {
                 if (it->node.lock() == sourceNode && it->outputChannel == outputChannel)
                 {
-                    connections.erase(it);
+                    connections.erase (it);
                     return true;
                 }
             }
             return false;
         }
-        
+
         /**
          * @brief Clear all input connections
          */
@@ -106,7 +111,7 @@ namespace PlayfulTones::DspToolBox
         {
             inputs.clear();
         }
-        
+
         /**
          * @brief Get all input connections for this node
          * @return Map of input channels to connections
@@ -115,18 +120,18 @@ namespace PlayfulTones::DspToolBox
         {
             return inputs;
         }
-        
+
         /**
          * @brief Process audio through this node and its inputs
          * @param buffer The audio buffer to process
          * @param processedNodes Set of nodes that have already been processed
          */
-        void process(BufferView& buffer, std::unordered_map<Id, bool>& processedNodes)
+        void process (BufferView& buffer, std::unordered_map<Id, bool>& processedNodes)
         {
             // Prevent cycles by checking if this node has already been processed
             if (processedNodes[id])
                 return;
-                
+
             // Process all inputs first
             for (auto& [channel, connections] : inputs)
             {
@@ -134,28 +139,28 @@ namespace PlayfulTones::DspToolBox
                 {
                     if (auto sourceNode = connection.node.lock())
                     {
-                        sourceNode->process(buffer, processedNodes);
+                        sourceNode->process (buffer, processedNodes);
                     }
                 }
             }
-            
+
             // Process this node
-            processor->process(buffer);
-            
+            processor->process (buffer);
+
             // Mark this node as processed
             processedNodes[id] = true;
         }
-        
+
         /**
          * @brief Prepare the node for processing
          * @param sampleRate The sample rate
          * @param maxFramesPerBlock The maximum number of frames per block
          */
-        void prepare(double sampleRate, int maxFramesPerBlock)
+        void prepare (double sampleRate, int maxFramesPerBlock)
         {
-            processor->prepare(sampleRate, maxFramesPerBlock);
+            processor->prepare (sampleRate, maxFramesPerBlock);
         }
-        
+
         /**
          * @brief Reset the node
          */
@@ -163,13 +168,12 @@ namespace PlayfulTones::DspToolBox
         {
             processor->reset();
         }
-        
+
     private:
-        
         std::unique_ptr<Processor> processor;
         Id id;
         std::unordered_map<int, std::vector<Connection>> inputs;
-        
+
         // Static counter for auto-generating IDs
         static inline Id nextId = 1;
     };

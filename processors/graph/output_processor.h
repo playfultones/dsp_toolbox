@@ -1,3 +1,9 @@
+/*******************************************************************
+* Copyright         : 2025 Playful Tones
+* Author            : Bence Kovács
+* License           : GNU General Public License v3.0
+*******************************************************************/
+
 #pragma once
 #include "../processor.h"
 
@@ -13,19 +19,19 @@ namespace PlayfulTones::DspToolBox
     {
     public:
         OutputProcessor() = default;
-        
-        void prepare(double sampleRate, int /* maxFramesPerBlock */) override
+
+        void prepare (double sampleRate, int /* maxFramesPerBlock */) override
         {
             // No processing needed, just store the sample rate
-            setSampleRate(sampleRate);
+            setSampleRate (sampleRate);
         }
-        
-        void process(BufferView& /* buffer */) override
+
+        void process (BufferView& /* buffer */) override
         {
             // This is the terminal node, it just passes audio through
             // No processing needed
         }
-        
+
         void reset() override
         {
             // Nothing to reset

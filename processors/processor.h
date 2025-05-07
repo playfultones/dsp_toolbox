@@ -1,3 +1,9 @@
+/*******************************************************************
+* Copyright         : 2025 Playful Tones
+* Author            : Bence Kovács
+* License           : GNU General Public License v3.0
+*******************************************************************/
+
 #pragma once
 #include "../core/buffer_view.h"
 

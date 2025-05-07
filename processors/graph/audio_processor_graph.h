@@ -1,3 +1,9 @@
+/*******************************************************************
+* Copyright         : 2025 Playful Tones
+* Author            : Bence Kovács
+* License           : GNU General Public License v3.0
+*******************************************************************/
+
 #pragma once
 #include "audio_graph.h"
 #include <memory>
@@ -13,26 +19,26 @@ namespace PlayfulTones::DspToolBox
     {
     public:
         AudioProcessorGraph() = default;
-        
+
         /**
          * @brief Process audio through the graph
          * @param buffer The audio buffer to process
          */
-        void process(BufferView& buffer) override
+        void process (BufferView& buffer) override
         {
-            graph.process(buffer);
+            graph.process (buffer);
         }
-        
+
         /**
          * @brief Prepare the graph for processing
          * @param sampleRate The sample rate
          * @param maxFramesPerBlock The maximum number of frames per block
          */
-        void prepare(double sampleRate, int maxFramesPerBlock) override
+        void prepare (double sampleRate, int maxFramesPerBlock) override
         {
-            graph.prepare(sampleRate, maxFramesPerBlock);
+            graph.prepare (sampleRate, maxFramesPerBlock);
         }
-        
+
         /**
          * @brief Reset all nodes in the graph
          */
@@ -40,21 +46,21 @@ namespace PlayfulTones::DspToolBox
         {
             graph.reset();
         }
-        
+
         /**
          * @brief Add a processor node to the graph
          * @param processor The processor to add
          * @return ID of the created node
          */
-        AudioGraphNode::Id addProcessor(std::unique_ptr<Processor> processor)
+        AudioGraphNode::Id addProcessor (std::unique_ptr<Processor> processor)
         {
             auto& builder = graph.getBuilder();
-            auto node = builder.addNode(std::move(processor));
+            auto node = builder.addNode (std::move (processor));
             AudioGraphNode::Id id = node->getId();
             graph.applyChanges();
             return id;
         }
-        
+
         /**
          * @brief Construct and add a processor node to the graph
          * @tparam T The processor type
@@ -63,15 +69,15 @@ namespace PlayfulTones::DspToolBox
          * @return ID of the created node
          */
         template <typename T, typename... Args>
-        AudioGraphNode::Id addProcessor(Args&&... args)
+        AudioGraphNode::Id addProcessor (Args&&... args)
         {
             auto& builder = graph.getBuilder();
-            auto node = builder.addNode<T>(std::forward<Args>(args)...);
+            auto node = builder.addNode<T> (std::forward<Args> (args)...);
             AudioGraphNode::Id id = node->getId();
             graph.applyChanges();
             return id;
         }
-        
+
         /**
          * @brief Connect two processor nodes
          * @param sourceId ID of the source node
@@ -80,17 +86,14 @@ namespace PlayfulTones::DspToolBox
          * @param destinationChannel Input channel on the destination node
          * @return True if the connection was successful
          */
-        bool connect(AudioGraphNode::Id sourceId, AudioGraphNode::Id destinationId, 
-                    int sourceChannel = 0, int destinationChannel = 0)
+        bool connect (AudioGraphNode::Id sourceId, AudioGraphNode::Id destinationId, int sourceChannel = 0, int destinationChannel = 0)
         {
             auto& builder = graph.getBuilder();
-            bool result = builder.connect(sourceId, destinationId, 
-                                        sourceChannel, destinationChannel);
+            bool result = builder.connect (sourceId, destinationId, sourceChannel, destinationChannel);
             graph.applyChanges();
             return result;
         }
-        
-        
+
         /**
          * @brief Disconnect two processor nodes
          * @param sourceId ID of the source node
@@ -99,29 +102,27 @@ namespace PlayfulTones::DspToolBox
          * @param destinationChannel Input channel on the destination node
          * @return True if the disconnection was successful
          */
-        bool disconnect(AudioGraphNode::Id sourceId, AudioGraphNode::Id destinationId,
-                      int sourceChannel = 0, int destinationChannel = 0)
+        bool disconnect (AudioGraphNode::Id sourceId, AudioGraphNode::Id destinationId, int sourceChannel = 0, int destinationChannel = 0)
         {
             auto& builder = graph.getBuilder();
-            bool result = builder.disconnect(sourceId, destinationId,
-                                          sourceChannel, destinationChannel);
+            bool result = builder.disconnect (sourceId, destinationId, sourceChannel, destinationChannel);
             graph.applyChanges();
             return result;
         }
-        
+
         /**
          * @brief Remove a processor node from the graph
          * @param id ID of the node to remove
          * @return True if the node was found and removed
          */
-        bool removeProcessor(AudioGraphNode::Id id)
+        bool removeProcessor (AudioGraphNode::Id id)
         {
             auto& builder = graph.getBuilder();
-            bool result = builder.removeNode(id);
+            bool result = builder.removeNode (id);
             graph.applyChanges();
             return result;
         }
-        
+
         /**
          * @brief Clear all nodes from the graph
          */
@@ -129,7 +130,7 @@ namespace PlayfulTones::DspToolBox
         {
             graph.clear();
         }
-        
+
         /**
          * @brief Get a processor by its ID
          * @tparam T The processor type to cast to
@@ -137,25 +138,25 @@ namespace PlayfulTones::DspToolBox
          * @return Pointer to the processor, or nullptr if not found or wrong type
          */
         template <typename T>
-        T* getProcessor(AudioGraphNode::Id id)
+        T* getProcessor (AudioGraphNode::Id id)
         {
             auto& builder = graph.getBuilder();
-            auto node = builder.getNode(id);
+            auto node = builder.getNode (id);
             if (!node)
                 return nullptr;
-                
-            return dynamic_cast<T*>(node->getProcessor());
+
+            return dynamic_cast<T*> (node->getProcessor());
         }
-        
+
         /**
          * @brief Get the output node of the graph
          * @return The output node pointer
          */
-        AudioGraphNode::Ptr getOutputNode() 
+        AudioGraphNode::Ptr getOutputNode()
         {
             return graph.getBuilder().getOutputNode();
         }
-        
+
     private:
         AudioGraph graph;
     };
