@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/processor.h"
+#include "../processors/processor.h"
 #include <algorithm>
 #include <cmath>
 

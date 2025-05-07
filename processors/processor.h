@@ -1,5 +1,5 @@
 #pragma once
-#include "buffer_view.h"
+#include "../core/buffer_view.h"
 
 namespace PlayfulTones::DspToolBox
 {

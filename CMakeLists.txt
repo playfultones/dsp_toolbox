@@ -16,10 +16,10 @@ else()
     add_compile_options(-Wall -Wextra -Werror -pedantic)
 endif()
 
-# Add processor chain test
-add_executable(test_processor_chain tests/test_processor_chain.cpp)
-target_include_directories(test_processor_chain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME processor_chain_test COMMAND test_processor_chain)
+# Add audio graph test
+add_executable(test_audio_graph tests/test_audio_graph.cpp)
+target_include_directories(test_audio_graph PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME audio_graph_test COMMAND test_audio_graph)
 
 # Add buffer validators test
 add_executable(test_buffer_validators tests/test_buffer_validators.cpp)
