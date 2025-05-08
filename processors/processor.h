@@ -34,19 +34,6 @@ namespace PlayfulTones::DspToolBox
         virtual void process (BufferView& buffer) = 0;
 
         /**
-         * @brief Legacy process function for backward compatibility.
-         * @param buffer Array of audio channel data.
-         * @param numChannels Number of channels in the buffer.
-         * @param numFrames Number of frames to process.
-         */
-        void process (float** buffer, int numChannels, int numFrames)
-        {
-            BufferView view;
-            view.setData (buffer, numChannels, numFrames);
-            process (view);
-        }
-
-        /**
          * @brief Reset the processor's internal state.
          */
         virtual void reset()
