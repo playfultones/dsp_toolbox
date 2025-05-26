@@ -22,9 +22,8 @@ namespace PlayfulTones::DspToolBox
 
         ~ADSR() = default;
 
-        void prepare (double sampleRate, int /*maxFramesPerBlock*/) override
+        void prepare (double /* sampleRate */, int /* maxFramesPerBlock */) override
         {
-            setSampleRate (sampleRate);
             reset();
         }
 

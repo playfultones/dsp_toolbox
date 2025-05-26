@@ -22,9 +22,8 @@ namespace PlayfulTones::DspToolBox
     public:
         Gain() : gain_ (1.0f), targetGain_ (1.0f), rampLengthSeconds_ (0.0f), rampLengthSamples_ (0), currentRampSample_ (0) {}
 
-        void prepare (double sampleRate, int /*maxFramesPerBlock*/) override
+        void prepare (double /* sampleRate */, int /* maxFramesPerBlock */) override
         {
-            setSampleRate (sampleRate);
             reset();
         }
 

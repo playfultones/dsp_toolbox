@@ -20,10 +20,9 @@ namespace PlayfulTones::DspToolBox
     public:
         OutputProcessor() = default;
 
-        void prepare (double sampleRate, int /* maxFramesPerBlock */) override
+        void prepare (double /* sampleRate */, int /* maxFramesPerBlock */) override
         {
-            // No processing needed, just store the sample rate
-            setSampleRate (sampleRate);
+            // No processing needed
         }
 
         void process (BufferView& /* buffer */) override

@@ -21,6 +21,20 @@ namespace PlayfulTones::DspToolBox
         virtual ~Processor() = default;
 
         /**
+         * @brief This method is used to prepare the processor for playback.
+         * It sets the sample rate and calls the virtual prepare method to allow derived classes
+         * to implement their own preparation logic.
+         * @param sampleRate The sample rate at which the processor will operate.
+         * @param maxFramesPerBlock The maximum number of frames that will be processed at once.
+         */
+        void prepareProcessor (double sampleRate, int maxFramesPerBlock)
+        {
+            setSampleRate (sampleRate);
+            // Call the virtual prepare method to allow derived classes to implement their own preparation logic.
+            prepare (sampleRate, maxFramesPerBlock);
+        }
+
+        /**
          * @brief Prepare the processor for playback.
          * @param sampleRate The sample rate at which the processor will operate.
          * @param maxFramesPerBlock The maximum number of frames that will be processed at once.
@@ -46,7 +60,7 @@ namespace PlayfulTones::DspToolBox
          * @brief Get the sample rate of the processor.
          * @return The sample rate at which the processor is operating.
          */
-        virtual double getSampleRate() const
+        double getSampleRate() const
         {
             return sr;
         }
@@ -55,7 +69,7 @@ namespace PlayfulTones::DspToolBox
          * @brief Set the sample rate of the processor.
          * @param sampleRate The new sample rate to set.
          */
-        virtual void setSampleRate (double sampleRate)
+        void setSampleRate (double sampleRate)
         {
             sr = sampleRate;
         }
