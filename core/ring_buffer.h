@@ -20,12 +20,17 @@ namespace PlayfulTones::DspToolBox
      * It's lock-free and allocation-free during normal operation (push/pop).
      * 
      * @tparam T The type of elements stored in the ring buffer
+     * @tparam Container The container type used for storage (default: std::vector<T>)
      */
-    template <typename T>
+    template <typename T, typename Container = std::vector<T>>
     class RingBuffer
     {
     public:
         static constexpr size_t DefaultCapacity = 1024; // Default initial capacity
+
+        // Verify that our atomic operations are lock-free
+        static_assert (std::atomic<size_t>::is_always_lock_free,
+            "std::atomic<size_t> must be lock-free for this implementation");
         /**
          * @brief Construct a new Ring Buffer with the given capacity
          * 
@@ -61,7 +66,7 @@ namespace PlayfulTones::DspToolBox
                 newCapacity = nextPowerOfTwo (newCapacity);
 
             // Create new storage
-            std::vector<T> newData (newCapacity);
+            Container newData (newCapacity);
 
             // Copy existing elements if any
             const size_t size = getSize();
@@ -135,6 +140,8 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Push a new element into the ring buffer
          * 
+         * This method is guaranteed to be allocation-free and lock-free.
+         * 
          * @param value The value to push
          * @return true if push was successful, false if buffer is full
          */
@@ -158,6 +165,8 @@ namespace PlayfulTones::DspToolBox
 
         /**
          * @brief Push a new element using move semantics
+         * 
+         * This method is guaranteed to be allocation-free and lock-free.
          * 
          * @param value The value to push (will be moved from)
          * @return true if push was successful, false if buffer is full
@@ -183,6 +192,8 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Pop an element from the ring buffer
          * 
+         * This method is guaranteed to be allocation-free and lock-free.
+         * 
          * @param[out] value Reference to store the popped value
          * @return true if pop was successful, false if buffer is empty
          */
@@ -206,6 +217,8 @@ namespace PlayfulTones::DspToolBox
 
         /**
          * @brief Peek at the next element without removing it
+         * 
+         * This method is guaranteed to be allocation-free and lock-free.
          * 
          * @param[out] value Reference to store the peeked value
          * @return true if peek was successful, false if buffer is empty
@@ -321,7 +334,7 @@ namespace PlayfulTones::DspToolBox
             return x + 1;
         }
 
-        std::vector<T> data_; // Storage for ring buffer elements
+        Container data_; // Storage for ring buffer elements
         size_t capacity_; // Current capacity (always a power of 2)
         std::atomic<size_t> readIndex_; // Current read position
         std::atomic<size_t> writeIndex_; // Current write position

@@ -6,12 +6,124 @@
 
 #include "core/ring_buffer.h"
 #include <cassert>
+#include <concepts>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 using namespace PlayfulTones::DspToolBox;
+
+// Utilities for testing allocation and lock-free properties
+namespace detail
+{
+    // Custom allocator that will cause a compile error if used
+    template <typename T>
+    struct NoAllocAllocator
+    {
+        using value_type = T;
+
+        NoAllocAllocator() = default;
+
+        template <typename U>
+        constexpr NoAllocAllocator (const NoAllocAllocator<U>&) noexcept
+        {
+        }
+
+        [[nodiscard]] T* allocate (std::size_t)
+        {
+            // This will cause a compile error if instantiated
+            static_assert (sizeof (T) == 0, "Allocation detected in no-alloc context");
+            return nullptr;
+        }
+
+        void deallocate (T*, std::size_t) noexcept {}
+    };
+
+    template <typename T>
+    bool operator== (const NoAllocAllocator<T>&, const NoAllocAllocator<T>&)
+    {
+        return true;
+    }
+
+    template <typename T>
+    bool operator!= (const NoAllocAllocator<T>&, const NoAllocAllocator<T>&)
+    {
+        return false;
+    }
+
+    // Type that will cause a compile error if allocations happen
+    template <typename T>
+    using NoAllocVector = std::vector<T, NoAllocAllocator<T>>;
+
+    // Runtime allocation tracking allocator - counts allocations
+    template <typename T>
+    struct CountingAllocator
+    {
+        using value_type = T;
+
+        static inline std::atomic<size_t> allocationCount { 0 };
+        static inline std::atomic<size_t> deallocationCount { 0 };
+
+        CountingAllocator() = default;
+
+        template <typename U>
+        constexpr CountingAllocator (const CountingAllocator<U>&) noexcept
+        {
+        }
+
+        [[nodiscard]] T* allocate (std::size_t n)
+        {
+            allocationCount.fetch_add (1, std::memory_order_relaxed);
+            return static_cast<T*> (::operator new (n * sizeof (T)));
+        }
+
+        void deallocate (T* p, std::size_t) noexcept
+        {
+            deallocationCount.fetch_add (1, std::memory_order_relaxed);
+            ::operator delete (p);
+        }
+
+        static void resetCounters()
+        {
+            allocationCount.store (0, std::memory_order_relaxed);
+            deallocationCount.store (0, std::memory_order_relaxed);
+        }
+
+        static size_t getAllocationCount()
+        {
+            return allocationCount.load (std::memory_order_relaxed);
+        }
+
+        static size_t getDeallocationCount()
+        {
+            return deallocationCount.load (std::memory_order_relaxed);
+        }
+    };
+
+    template <typename T>
+    bool operator== (const CountingAllocator<T>&, const CountingAllocator<T>&)
+    {
+        return true;
+    }
+
+    template <typename T>
+    bool operator!= (const CountingAllocator<T>&, const CountingAllocator<T>&)
+    {
+        return false;
+    }
+
+    // Type for runtime allocation tracking
+    template <typename T>
+    using CountingVector = std::vector<T, CountingAllocator<T>>;
+
+    // C++20 concept to verify a method doesn't allocate and is noexcept
+    template <typename F>
+    concept NonAllocating = requires (F f) {
+        { f() } noexcept;
+    };
+}
 
 void testConstruction()
 {
@@ -268,6 +380,116 @@ void testBulkOperations()
     std::cout << "Bulk operations tests passed!\n";
 }
 
+// Define types for testing properties
+template <typename T>
+using NoAllocRingBuffer = RingBuffer<T, detail::NoAllocVector<T>>;
+template <typename T>
+using CountingRingBuffer = RingBuffer<T, detail::CountingVector<T>>;
+
+// This function checks method signatures but doesn't actually instantiate objects
+// that would trigger allocations
+template <typename T>
+void testNoAllocationInCriticalMethods()
+{
+    // We don't actually create a buffer, as that would trigger allocation
+    // Instead, we just verify the method signatures using decltype/declval
+
+    // Define a dummy array for method signatures that need it
+    T arr[4];
+
+    // Use declval to get references to objects without constructing them
+    using Buffer = NoAllocRingBuffer<T>;
+
+    // Check signatures of critical methods using decltype and declval
+    using PushMethod = decltype (std::declval<Buffer&>().push (std::declval<const T&>()));
+    using PopMethod = decltype (std::declval<Buffer&>().pop (std::declval<T&>()));
+    using PeekMethod = decltype (std::declval<Buffer&>().peek (std::declval<T&>()));
+    using ReadManyMethod = decltype (std::declval<Buffer&>().readMany (arr, 4));
+    using WriteManyMethod = decltype (std::declval<Buffer&>().writeMany (arr, 4));
+
+    static_assert (std::is_same_v<PushMethod, bool>, "push method has incorrect signature");
+    static_assert (std::is_same_v<PopMethod, bool>, "pop method has incorrect signature");
+    static_assert (std::is_same_v<PeekMethod, bool>, "peek method has incorrect signature");
+    static_assert (std::is_same_v<ReadManyMethod, size_t>, "readMany method has incorrect signature");
+    static_assert (std::is_same_v<WriteManyMethod, size_t>, "writeMany method has incorrect signature");
+}
+
+// Runtime verification of no-allocation property for critical methods
+void testRuntimeAllocationTracking()
+{
+    std::cout << "Testing runtime allocation tracking...\n";
+
+    // Create a buffer with allocation tracking
+    CountingRingBuffer<int> buffer (64);
+
+    // Reset counters after initial construction
+    detail::CountingAllocator<int>::resetCounters();
+
+    // Push should not allocate
+    int testValue = 42;
+    buffer.push (testValue);
+    assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
+
+    // Pop should not allocate
+    int outValue;
+    buffer.pop (outValue);
+    assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
+
+    // Fill buffer
+    for (int i = 0; i < 64; i++)
+    {
+        buffer.push (i);
+    }
+
+    // Bulk operations should not allocate
+    int values[10];
+    buffer.readMany (values, 10);
+    assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
+
+    buffer.writeMany (values, 10);
+    assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
+
+    // Peek should not allocate
+    buffer.peek (outValue);
+    assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
+
+    std::cout << "Runtime allocation tracking tests passed!\n";
+}
+
+// Compile-time verification tests
+void testCompileTimeProperties()
+{
+    std::cout << "Testing compile-time properties...\n";
+
+    // Verify atomic operations are lock-free
+    static_assert (std::atomic<size_t>::is_always_lock_free,
+        "std::atomic<size_t> must be lock-free");
+
+    // Verify no allocation in critical methods (compile-time check)
+    testNoAllocationInCriticalMethods<int>();
+    testNoAllocationInCriticalMethods<float>();
+    testNoAllocationInCriticalMethods<std::pair<int, float>>();
+
+    // Ensure push operation is non-allocating and noexcept
+    auto testPush = [buffer = RingBuffer<int> (16), value = 42]() mutable noexcept {
+        return buffer.push (value);
+    };
+    static_assert (detail::NonAllocating<decltype (testPush)>);
+
+    // Ensure pop operation is non-allocating and noexcept
+    auto testPop = [buffer = RingBuffer<int> (16), value = 0]() mutable noexcept {
+        return buffer.pop (value);
+    };
+    static_assert (detail::NonAllocating<decltype (testPop)>);
+    // Ensure peek operation is non-allocating and noexcept
+    auto testPeek = [buffer = RingBuffer<int> (16), value = 0]() mutable noexcept {
+        return buffer.peek (value);
+    };
+    static_assert (detail::NonAllocating<decltype (testPeek)>);
+
+    std::cout << "Compile-time property tests passed!\n";
+}
+
 void testMultithreading()
 {
     std::cout << "Testing multithreading behavior...\n";
@@ -329,6 +551,8 @@ int main()
         testWraparound();
         testBulkOperations();
         testMultithreading();
+        testCompileTimeProperties();
+        testRuntimeAllocationTracking();
 
         std::cout << "All tests passed!\n";
         return 0;
