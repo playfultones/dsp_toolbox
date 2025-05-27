@@ -9,6 +9,7 @@
 #include "../core/ring_buffer.h"
 #include "../processors/processor.h"
 #include <cmath>
+#include <algorithm>
 
 namespace PlayfulTones::DspToolBox
 {
@@ -79,16 +80,22 @@ namespace PlayfulTones::DspToolBox
 
         float getNextSample(float inputSample)
         {
-            // Read from the delay buffer
             float delaySample = 0.0f;
-            delayBuffer.peek (delaySample);
+            
+            // Read the delayed sample
+            delayBuffer.peekAt(delaySample, delaySamples.load());
 
             // Calculate the output sample with dry/wet mix
             const float outputSample = (1.0f - mix) * inputSample + mix * delaySample;
 
-            // Write back to the delay buffer with feedback
-            delayBuffer.pop (delaySample); // Remove the sample we just read
-            delayBuffer.push (inputSample + feedback * delaySample);
+            // Discard the oldest sample if the buffer is full
+            if (delayBuffer.isFull())
+            {
+                delayBuffer.discard(1);
+            }
+
+            // Write input + feedback to the delay buffer
+            delayBuffer.push(inputSample + feedback * delaySample);
 
             return outputSample;
         }
@@ -106,17 +113,18 @@ namespace PlayfulTones::DspToolBox
          * 
          * @param delayTimeMs The new delay time in milliseconds (0 to 2000)
          */
-        void setDelayTime (float delayTimeMs)
+        void setDelayTime(float delayTimeMs)
         {
+            if(std::abs(delayTimeMs - delayMs.load()) < 0.001f)
+                return; // No change, avoid unnecessary updates
             // Clamp to valid range
-            delayTimeMs = std::max (0.0f, std::min (delayTimeMs, MaxDelayTimeMs));
-
+            delayTimeMs = std::max(0.0f, std::min(delayTimeMs, MaxDelayTimeMs));
             delayMs = delayTimeMs;
 
             // Update delay samples if we have a valid sample rate
             if (getSampleRate() > 0.0)
             {
-                delaySamples = static_cast<int> ((delayMs / 1000.0f) * getSampleRate());
+                delaySamples = static_cast<size_t>(std::max(0.0f, (delayMs.load() / 1000.0f) * static_cast<float>(getSampleRate())));
             }
         }
 
@@ -127,6 +135,8 @@ namespace PlayfulTones::DspToolBox
          */
         void setFeedback (float feedbackAmount)
         {
+            if (std::abs(feedbackAmount - feedback.load()) < 0.001f)
+                return; // No change, avoid unnecessary updates
             // Clamp to valid range
             feedback = std::max (0.0f, std::min (feedbackAmount, 1.0f));
         }
@@ -138,6 +148,8 @@ namespace PlayfulTones::DspToolBox
          */
         void setMix (float mixAmount)
         {
+            if (std::abs(mixAmount - mix.load()) < 0.001f)
+                return; // No change, avoid unnecessary updates
             // Clamp to valid range
             mix = std::max (0.0f, std::min (mixAmount, 1.0f));
         }
@@ -199,7 +211,7 @@ namespace PlayfulTones::DspToolBox
         std::atomic<float> delayMs; // Delay time in milliseconds
         std::atomic<float> feedback; // Feedback amount (0.0 to 1.0)
         std::atomic<float> mix; // Dry/wet mix (0.0 = dry, 1.0 = wet)
-        std::atomic<int> delaySamples; // Delay time in samples
+        std::atomic<size_t> delaySamples{ 0 }; // Delay time in samples
         std::atomic<int> channelIndex { 0 }; // Current channel index
 
         RingBuffer<float> delayBuffer; // The delay line buffer
