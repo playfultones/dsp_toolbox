@@ -239,6 +239,31 @@ namespace PlayfulTones::DspToolBox
         }
 
         /**
+         * @brief Peek at an element at a specific offset from the read position
+         * 
+         * This method is guaranteed to be allocation-free and lock-free.
+         * 
+         * @param[out] value Reference to store the peeked value
+         * @param offset The offset from the current read position
+         * @return true if peek was successful, false if the position is invalid
+         */
+        bool peekAt (T& value, size_t offset) const
+        {
+            const auto currentRead = readIndex_.load (std::memory_order_relaxed);
+            const auto currentWrite = writeIndex_.load (std::memory_order_acquire);
+
+            // Calculate the actual position to read from
+            const auto readPos = (currentRead + offset) & (capacity_ - 1);
+            
+            // Check if the position is within valid range
+            if (offset >= (currentWrite - currentRead))
+                return false;
+
+            value = data_[readPos];
+            return true;
+        }
+
+        /**
          * @brief Discard a number of elements from the front of the buffer
          * 
          * @param count Number of elements to discard
