@@ -73,23 +73,24 @@ namespace PlayfulTones::DspToolBox
 
             for (int i = 0; i < numFrames; ++i)
             {
-                // Get the current sample
-                const float inputSample = channelData[i];
-
-                // Read from the delay buffer
-                float delaySample = 0.0f;
-                delayBuffer.peek (delaySample);
-
-                // Calculate the output sample with dry/wet mix
-                const float outputSample = (1.0f - mix) * inputSample + mix * delaySample;
-
-                // Write back to the delay buffer with feedback
-                delayBuffer.pop (delaySample); // Remove the sample we just read
-                delayBuffer.push (inputSample + feedback * delaySample);
-
-                // Write the output sample to the buffer
-                channelData[i] = outputSample;
+                channelData[i] = getNextSample(channelData[i]);
             }
+        }
+
+        float getNextSample(float inputSample)
+        {
+            // Read from the delay buffer
+            float delaySample = 0.0f;
+            delayBuffer.peek (delaySample);
+
+            // Calculate the output sample with dry/wet mix
+            const float outputSample = (1.0f - mix) * inputSample + mix * delaySample;
+
+            // Write back to the delay buffer with feedback
+            delayBuffer.pop (delaySample); // Remove the sample we just read
+            delayBuffer.push (inputSample + feedback * delaySample);
+
+            return outputSample;
         }
 
         /**
