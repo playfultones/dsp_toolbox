@@ -1,7 +1,7 @@
 /*******************************************************************
-* Copyright        : 2025 Playful Tones
-* Author           : Bence Kovács
-* License          : GNU General Public License v3.0
+* Copyright         : 2025 Playful Tones
+* Author            : Bence Kovács
+* License           : GNU General Public License v3.0
 *******************************************************************/
 
 #include "midi/midi_sequence.h"

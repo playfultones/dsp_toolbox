@@ -1,3 +1,9 @@
+/*******************************************************************
+* Copyright         : 2025 Playful Tones
+* Author            : Bence Kovács
+* License           : GNU General Public License v3.0
+*******************************************************************/
+
 #include "analysis/zerocrossing.h"
 #include "core/constants.h"
 #include <cassert>
@@ -190,17 +196,17 @@ void testDirectionalZeroCrossing()
     // The ZCR for positive or negative only should be approximately half of the total ZCR
     // For frequency detection, we allow 0.5 Hz difference, which means about 1 crossing difference per second
     // This translates to a ZCR difference of about (1.0 / sineFrames) for our buffer length
-    float toleranceZCR = 2.0f / static_cast<float>(sineFrames); // Allow 2 crossings difference
-    
+    float toleranceZCR = 2.0f / static_cast<float> (sineFrames); // Allow 2 crossings difference
+
     // Verify that positive + negative = total (this should be exact)
-    float sumDiff = std::abs(zcrTotal - (zcrPositive + zcrNegative));
-    printf("ZCR Sum difference: %.9f\n", sumDiff);
-    assert(sumDiff < 0.000001f && "Total ZCR should equal sum of directional ZCRs");
+    float sumDiff = std::abs (zcrTotal - (zcrPositive + zcrNegative));
+    printf ("ZCR Sum difference: %.9f\n", sumDiff);
+    assert (sumDiff < 0.000001f && "Total ZCR should equal sum of directional ZCRs");
 
     // Verify that positive ≈ negative (allowing for quantization effects)
-    float zcrDiff = std::abs(zcrPositive - zcrNegative);
-    printf("ZCR Difference: %.9f (tolerance: %.9f)\n", zcrDiff, toleranceZCR);
-    assert(zcrDiff < toleranceZCR && "Positive and negative ZCRs should be approximately equal for sine wave");
+    float zcrDiff = std::abs (zcrPositive - zcrNegative);
+    printf ("ZCR Difference: %.9f (tolerance: %.9f)\n", zcrDiff, toleranceZCR);
+    assert (zcrDiff < toleranceZCR && "Positive and negative ZCRs should be approximately equal for sine wave");
 
     delete[] sineWave;
 }
