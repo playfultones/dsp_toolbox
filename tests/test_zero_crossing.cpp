@@ -1,4 +1,5 @@
-#include "../analysis/zerocrossing.h"
+#include "analysis/zerocrossing.h"
+#include "core/constants.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -10,7 +11,7 @@ void generateSineWave (float* buffer, int numSamples, float frequency, float sam
 {
     for (int i = 0; i < numSamples; i++)
     {
-        buffer[i] = std::sin (2.0f * M_PI * frequency * i / sampleRate);
+        buffer[i] = std::sin (Constants::twoPi * frequency * i / sampleRate);
     }
 }
 
