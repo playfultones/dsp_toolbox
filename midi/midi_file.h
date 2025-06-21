@@ -74,19 +74,19 @@ namespace PlayfulTones::DspToolBox
                 runningTime = timedMsg.timestamp;
 
                 // Write MIDI message
-                file.put (timedMsg.message.getStatus());
-                file.put (timedMsg.message.getData1());
+                file.put (static_cast<unsigned char> (timedMsg.message.getStatus()));
+                file.put (static_cast<unsigned char> (timedMsg.message.getData1()));
                 if (!isOneByteMessage (timedMsg.message.getStatus()))
                 {
-                    file.put (timedMsg.message.getData2());
+                    file.put (static_cast<unsigned char> (timedMsg.message.getData2()));
                 }
             }
 
             // Write end of track meta event
             writeVariableLength (file, 0); // Delta time
-            file.put (0xFF); // Meta event
-            file.put (0x2F); // End of track
-            file.put (0x00); // Length
+            file.put (static_cast<unsigned char> (0xFF)); // Meta event
+            file.put (static_cast<unsigned char> (0x2F)); // End of track
+            file.put (static_cast<unsigned char> (0x00)); // Length
 
             // Go back and write the track length
             auto endPos = file.tellp();
