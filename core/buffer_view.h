@@ -27,23 +27,23 @@ namespace PlayfulTones::DspToolBox
          * @param numFrames Number of frames per channel
          * @throws std::invalid_argument if dimensions are invalid or buffer is null
          */
-        void setData (float** buffer, int numChannels, int numFrames)
+        void setData (float** buffer, int channelCount, int frameCount)
         {
             if (buffer == nullptr)
                 throw std::invalid_argument ("Buffer pointer cannot be null");
-            if (numChannels <= 0 || numFrames <= 0)
+            if (channelCount <= 0 || frameCount <= 0)
                 throw std::invalid_argument ("Buffer dimensions must be positive");
 
-            channelPointers.resize (numChannels);
-            for (int ch = 0; ch < numChannels; ++ch)
+            channelPointers.resize (channelCount);
+            for (int ch = 0; ch < channelCount; ++ch)
             {
                 if (buffer[ch] == nullptr)
                     throw std::invalid_argument ("Channel pointer cannot be null");
                 channelPointers[ch] = buffer[ch];
             }
 
-            this->numChannels = numChannels;
-            this->numFrames = numFrames;
+            this->numChannels = channelCount;
+            this->numFrames = frameCount;
         }
 
         /**

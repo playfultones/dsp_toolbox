@@ -58,11 +58,11 @@ namespace PlayfulTones::DspToolBox
          * @param sampleRate The sample rate
          * @param maxFramesPerBlock The maximum number of frames per block
          */
-        void prepare (double sampleRate, int maxFramesPerBlock) override
+        void prepare (double newSampleRate, int newMaxFramesPerBlock) override
         {
             // Store these values for future builder updates
-            this->sampleRate = sampleRate;
-            this->maxFramesPerBlock = maxFramesPerBlock;
+            this->sampleRate = newSampleRate;
+            this->maxFramesPerBlock = newMaxFramesPerBlock;
 
             std::lock_guard<std::mutex> lock (builderMutex);
             builder.prepareAll (sampleRate, maxFramesPerBlock);
