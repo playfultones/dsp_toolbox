@@ -236,7 +236,9 @@ namespace PlayfulTones::DspToolBox
          */
         [[nodiscard]] uint8_t getRandomVelocity() const noexcept
         {
-            return static_cast<uint8_t> (std::uniform_int_distribution<uint8_t> { m_velocityMin, m_velocityMax }(m_rng));
+            return static_cast<uint8_t> (std::uniform_int_distribution<unsigned int> {
+                static_cast<unsigned int> (m_velocityMin),
+                static_cast<unsigned int> (m_velocityMax) }(m_rng));
         }
 
         /**
