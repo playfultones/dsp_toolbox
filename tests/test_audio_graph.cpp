@@ -29,9 +29,9 @@ class MockProcessor : public Processor
 public:
     MockProcessor() = default;
 
-    void prepare (double sampleRate, int maxFramesPerBlock) override
+    void prepare (double newSampleRate, int maxFramesPerBlock) override
     {
-        this->sampleRate = sampleRate;
+        this->sampleRate = newSampleRate;
         this->maxBlockSize = maxFramesPerBlock;
         prepared = true;
     }
