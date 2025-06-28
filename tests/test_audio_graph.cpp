@@ -221,10 +221,16 @@ void testRoutingAndBufferHandling()
     for (int ch = 0; ch < numChannels; ++ch)
     {
         auto* channelData = buffer.getChannelPointer (ch);
+        bool allCorrect = true;
         for (int i = 0; i < numFrames; ++i)
         {
-            assert (std::abs (channelData[i] - 1.0f) < 0.00001f && "Buffer values should be 1.0 after processing");
+            if (std::abs (channelData[i] - 1.0f) >= 0.00001f)
+            {
+                allCorrect = false;
+                break;
+            }
         }
+        assert (allCorrect && "Buffer values should be 1.0 after processing");
     }
 
     std::cout << "Routing and buffer handling tests passed!" << std::endl;

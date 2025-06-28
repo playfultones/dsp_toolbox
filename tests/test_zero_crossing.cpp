@@ -29,7 +29,8 @@ void testBasicZeroCrossing()
     float* buffer[1] = { data };
 
     int crossings = countZeroCrossings (buffer, 1, numFrames);
-    assert (crossings == 4 && "Basic zero crossing test failed");
+    int expectedCrossings = 4; // We expect 4 zero crossings in our test data
+    assert (crossings == expectedCrossings && "Basic zero crossing test failed");
 }
 
 // Test zero crossing with a sine wave
@@ -49,7 +50,9 @@ void testSineWaveZeroCrossing()
     float expectedCrossings = 2.0f * frequency * (numFrames / sampleRate);
     float tolerance = 2.0f; // Allow for some numerical imprecision
 
-    assert (std::abs (crossings - expectedCrossings) <= tolerance && "Sine wave zero crossing count is not within expected range");
+    // Use the tolerance and expectedCrossings in a more explicit way
+    float difference = std::abs (crossings - expectedCrossings);
+    assert (difference <= tolerance && "Sine wave zero crossing count is not within expected range");
 
     delete[] sineWave;
 }

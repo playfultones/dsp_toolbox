@@ -159,7 +159,7 @@ void testPushPop()
     for (int i = 0; i < 8; ++i)
     {
         bool result = buffer.push (i);
-        assert (result);
+        assert (result && "Push should succeed");
         assert (buffer.getSize() == static_cast<size_t> (i + 1));
     }
 
