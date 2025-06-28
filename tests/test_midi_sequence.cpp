@@ -4,6 +4,7 @@
 * License           : GNU General Public License v3.0
 *******************************************************************/
 
+#include "helpers/compilationhelpers.h"
 #include "midi/midi_sequence.h"
 #include <cassert>
 #include <iostream>
@@ -53,6 +54,7 @@ void testMidiSequenceTimeOrdering()
     assert (messages[0].timestamp == 100);
     assert (messages[1].timestamp == 200);
     assert (messages[2].timestamp == 300);
+    markUsed (messages);
 }
 
 void testMidiSequenceTimeRangeQueries()
@@ -86,10 +88,12 @@ void testMidiSequenceTimeRangeQueries()
     assert (nextMsg != nullptr);
     assert (nextMsg->timestamp == 300);
     assert (nextMsg->message.isControlChange());
+    markUsed (nextMsg);
 
     // Test getNextMessage at end
     const auto* noNext = sequence.getNextMessage (400);
     assert (noNext == nullptr);
+    markUsed (noNext);
 }
 
 int main()

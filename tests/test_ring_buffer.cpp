@@ -5,6 +5,7 @@
 *******************************************************************/
 
 #include "core/ring_buffer.h"
+#include "helpers/compilationhelpers.h"
 #include <cassert>
 #include <concepts>
 #include <iostream>
@@ -161,6 +162,7 @@ void testPushPop()
         bool result = buffer.push (i);
         assert (result && "Push should succeed");
         assert (buffer.getSize() == static_cast<size_t> (i + 1));
+        markUsed (result);
     }
 
     // Buffer should be full now
@@ -176,6 +178,7 @@ void testPushPop()
         assert (result);
         assert (value == i);
         assert (buffer.getSize() == static_cast<size_t> (7 - i));
+        markUsed (result);
     }
 
     // Buffer should be empty now
@@ -184,6 +187,7 @@ void testPushPop()
 
     int value;
     assert (!buffer.pop (value)); // Should fail
+    markUsed (value);
 
     std::cout << "Push/pop tests passed!\n";
 }
@@ -197,6 +201,7 @@ void testPeek()
     // Test peek on empty buffer
     int value;
     assert (!buffer.peek (value));
+    markUsed (value);
 
     // Add some elements
     buffer.push (10);
@@ -277,6 +282,7 @@ void testResize()
     assert (value == 20);
     assert (buffer.pop (value));
     assert (value == 30);
+    markUsed (value);
 
     // Fill the buffer
     for (int i = 0; i < 8; ++i)
@@ -348,6 +354,7 @@ void testBulkOperations()
 
     assert (read == output.size());
     assert (buffer.getSize() == input.size() - output.size());
+    markUsed (read);
 
     for (size_t i = 0; i < output.size(); ++i)
     {
@@ -358,6 +365,7 @@ void testBulkOperations()
     size_t discarded = buffer.discard (2);
     assert (discarded == 2);
     assert (buffer.getSize() == 2);
+    markUsed (discarded);
 
     // Read remaining elements
     buffer.readMany (output.data(), 2);

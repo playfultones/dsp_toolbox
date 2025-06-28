@@ -6,6 +6,7 @@
 
 #include "analysis/zerocrossing.h"
 #include "core/constants.h"
+#include "helpers/compilationhelpers.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -31,6 +32,7 @@ void testBasicZeroCrossing()
     int crossings = countZeroCrossings (buffer, 1, numFrames);
     int expectedCrossings = 4; // We expect 4 zero crossings in our test data
     assert (crossings == expectedCrossings && "Basic zero crossing test failed");
+    markUsed (crossings, expectedCrossings);
 }
 
 // Test zero crossing with a sine wave
@@ -54,6 +56,7 @@ void testSineWaveZeroCrossing()
     float difference = std::abs (crossings - expectedCrossings);
     assert (difference <= tolerance && "Sine wave zero crossing count is not within expected range");
 
+    markUsed (difference, tolerance);
     delete[] sineWave;
 }
 
@@ -100,6 +103,7 @@ void testMultiChannelZeroCrossing()
     float* buffer[2] = { channel1, channel2 };
 
     int crossings = countZeroCrossings (buffer, numChannels, numFrames);
+    markUsed (crossings);
     assert (crossings == 6 && "Multi-channel zero crossing test failed"); // Total should be 6
 }
 
@@ -114,6 +118,7 @@ void testZeroCrossingRate()
 
         float zcr = calculateZeroCrossingRate (buffer, 1, numFrames);
         float expectedZCR = 4.0f / 5.0f; // 4 crossings / 5 samples
+        markUsed (zcr, expectedZCR);
         assert (std::abs (zcr - expectedZCR) < 0.0001f && "Basic ZCR test failed");
     }
 
@@ -133,6 +138,7 @@ void testZeroCrossingRate()
         float expectedZCR = 2.0f * frequency / sampleRate;
         float tolerance = 0.0001f;
 
+        markUsed (tolerance);
         printf ("Expected ZCR: %.6f\n", expectedZCR);
         printf ("Measured ZCR: %.6f\n", zcr);
         assert (std::abs (zcr - expectedZCR) <= tolerance && "Sine wave ZCR test failed");
@@ -151,6 +157,8 @@ void testZeroCrossingRate()
 
         float zcr = calculateZeroCrossingRate (buffer, numChannels, numFrames);
         float expectedZCR = 6.0f / (numFrames * numChannels); // 6 total crossings / 10 total samples
+
+        markUsed (zcr, expectedZCR);
         assert (std::abs (zcr - expectedZCR) < 0.0001f && "Multi-channel ZCR test failed");
     }
 }
@@ -174,6 +182,8 @@ void testDirectionalZeroCrossing()
     int totalCrossings = countZeroCrossings (buffer, 1, numFrames, ZeroCrossingDirection::All, 0.0f);
     assert (totalCrossings == positiveCrossings + negativeCrossings && "Total crossings should equal sum of directional crossings");
 
+    markUsed (positiveCrossings, negativeCrossings, totalCrossings);
+
     // Test with sine wave
     const float sampleRate = 44100.0f;
     const float frequency = 440.0f;
@@ -186,6 +196,8 @@ void testDirectionalZeroCrossing()
     int sinePositive = countZeroCrossings (sineBuffer, 1, sineFrames, ZeroCrossingDirection::Positive, 0.0f);
     int sineNegative = countZeroCrossings (sineBuffer, 1, sineFrames, ZeroCrossingDirection::Negative, 0.0f);
     int sineTotal = countZeroCrossings (sineBuffer, 1, sineFrames, ZeroCrossingDirection::All, 0.0f);
+
+    markUsed (sinePositive, sineNegative, sineTotal);
 
     // For a sine wave, positive and negative crossings should be approximately equal
     assert (std::abs (sinePositive - sineNegative) <= 1 && "Positive and negative crossings should be equal for sine wave");

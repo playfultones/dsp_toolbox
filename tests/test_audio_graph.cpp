@@ -6,6 +6,7 @@
 
 #include "dynamics/gain.h"
 #include "generators/noisegenerators.h"
+#include "helpers/compilationhelpers.h"
 #include "processors/graph/audio_graph_node.h"
 #include "processors/graph/audio_processor_graph.h"
 #include "processors/graph/graph_builder.h"
@@ -374,6 +375,7 @@ void testMultiNodeSignalFlow()
     bool allSamplesCorrect = compareAudioBuffers (audioBuffer, expectedBuffer);
     assert (allSamplesCorrect && "Samples should have both gains applied");
     std::cout << "Multi-node signal flow test passed!" << std::endl;
+    markUsed (allSamplesCorrect);
 }
 
 // ======== 6. TOPOLOGY UPDATES TESTS ========
@@ -419,6 +421,7 @@ void testTopologyUpdates()
     assert (procB->getProcessCallCount() == 1 && "ProcessorB should be called once");
     assert (procC->getProcessCallCount() == 1 && "ProcessorC should be called once");
     assert (procD->getProcessCallCount() == 1 && "ProcessorD should be called once");
+    markUsed (procA, procB, procC, procD);
 
     // Change topology: Remove B and connect A directly to D
     graph.disconnect (nodeA, nodeB);
@@ -526,6 +529,7 @@ void testChainOfResponsibility()
     auto* procA = graph.getProcessor<BypassableProcessor> (nodeA);
     auto* procB = graph.getProcessor<MockProcessor> (nodeB);
     auto* procC = graph.getProcessor<BypassableProcessor> (nodeC);
+    markUsed (procA, procB, procC);
 
     // Set up a processing chain: A->B->C->Output
     graph.connect (nodeA, nodeB);
