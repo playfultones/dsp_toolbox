@@ -50,6 +50,7 @@ void testBufferComparison()
 
     auto& bufferA = storageA.getBuffer();
     auto& bufferB = storageB.getBuffer();
+    markUsed (bufferA);
 
     // Fill buffers with identical data
     for (size_t ch = 0; ch < NumChannels; ++ch)
