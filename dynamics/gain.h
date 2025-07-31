@@ -10,6 +10,11 @@
 #include <cmath>
 #include <atomic>
 
+// Platform-specific denormal handling
+#if defined(__SSE__)
+#include <xmmintrin.h>
+#endif
+
 namespace PlayfulTones::DspToolBox
 {
     /**
@@ -48,6 +53,11 @@ namespace PlayfulTones::DspToolBox
 
         void prepare_impl() noexcept
         {
+            // Set up denormal handling if available
+#if defined(__SSE__)
+            _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+            _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#endif
             reset_impl();
         }
 
@@ -82,10 +92,11 @@ namespace PlayfulTones::DspToolBox
                     gain_ += stillRamping ? gainIncrement : sample_type{0};
                     currentRampSample_ += stillRamping ? 1 : 0;
 
-                    // Apply gain to all channels
+                    // Apply gain to all channels with denormal prevention
+                    const sample_type processedGain = gain_ + kDenormalOffset;
                     for (size_t ch = 0; ch < numChannels; ++ch)
                     {
-                        buffer[ch][i] *= gain_;
+                        buffer[ch][i] = buffer[ch][i] * processedGain + kDenormalOffset;
                     }
                 }
             }
@@ -94,15 +105,19 @@ namespace PlayfulTones::DspToolBox
                 // Process without ramping (fast path)
                 gain_ = targetGain;
                 
-                // Loop unroll hint for compiler
+                // SIMD-friendly processing - apply denormal prevention
+                const sample_type processedGain = gain_ + kDenormalOffset;
+                
+                // Loop unroll hint for compiler - process channels
                 for (size_t ch = 0; ch < numChannels; ++ch)
                 {
                     sample_type* channelData = buffer[ch].data();
                     
-                    // Process samples in blocks for better cache usage
+                    // Process samples in blocks for better vectorization
+                    // Compiler can auto-vectorize this pattern more easily
                     for (size_t i = 0; i < numFrames; ++i)
                     {
-                        channelData[i] *= gain_;
+                        channelData[i] = channelData[i] * processedGain + kDenormalOffset;
                     }
                 }
             }
@@ -183,10 +198,13 @@ namespace PlayfulTones::DspToolBox
         sample_type gain_{1};
         size_t currentRampSample_{0};
 
-        // Thread-safe parameter storage
-        std::atomic<sample_type> targetGain_{sample_type{1}};
-        std::atomic<sample_type> rampLengthSeconds_{sample_type{0}};
-        std::atomic<size_t> rampLengthSamples_{0};
+        // Thread-safe parameter storage - aligned to prevent false sharing
+        alignas(64) std::atomic<sample_type> targetGain_{sample_type{1}};
+        alignas(64) std::atomic<sample_type> rampLengthSeconds_{sample_type{0}};
+        alignas(64) std::atomic<size_t> rampLengthSamples_{0};
+
+        // Denormal prevention constant
+        static constexpr sample_type kDenormalOffset = sample_type{1e-25};
     };
     
     // Common type aliases
