@@ -10,19 +10,37 @@
 #include "../processors/processor.h"
 #include <cmath>
 #include <algorithm>
+#include <atomic>
+#include <array>
 
 namespace PlayfulTones::DspToolBox
 {
     /**
-     * @brief A mono delay processor.
+     * @brief High-performance multi-channel delay processor using CRTP
      * 
-     * It supports delay times up to 2 seconds, with controls for feedback level
-     * and dry/wet mix.
+     * This delay processor supports delay times up to 2 seconds, with controls for 
+     * feedback level and dry/wet mix. Uses compile-time optimization and separate
+     * delay lines for each channel.
+     * 
+     * @tparam SampleType The sample type (float, double)
+     * @tparam BlockSize Fixed block size for processing
+     * @tparam SampleRate Sample rate (compile-time constant)
+     * @tparam NumChannels Number of audio channels
      */
-    class Delay : public Processor
+    template<typename SampleType = float, 
+             size_t BlockSize = 512, 
+             size_t SampleRate = 44100,
+             size_t NumChannels = 2>
+    class Delay : public ProcessorBase<Delay<SampleType, BlockSize, SampleRate, NumChannels>,
+                                       SampleType, BlockSize, SampleRate, NumChannels>
     {
     public:
-        static constexpr auto MaxDelayTimeMs = 2000.0f; // Maximum delay time in milliseconds
+        using Base = ProcessorBase<Delay, SampleType, BlockSize, SampleRate, NumChannels>;
+        using AudioBuffer = typename Base::AudioBuffer;
+        using sample_type = SampleType;
+        
+        static constexpr sample_type MaxDelayTimeMs = sample_type{2000}; // Maximum delay time in milliseconds
+        
         /**
          * @brief Construct a new Delay processor
          * 
@@ -30,190 +48,179 @@ namespace PlayfulTones::DspToolBox
          * @param initialFeedback Initial feedback amount (0.0 to 1.0)
          * @param initialMix Initial dry/wet mix (0.0 = dry, 1.0 = wet)
          */
-        Delay (float initialDelayMs = 500.0f, float initialFeedback = 0.5f, float initialMix = 0.5f)
-            : delayMs (initialDelayMs), feedback (initialFeedback), mix (initialMix), delayBuffer (1) // Start with minimum size, will be resized in prepare()
+        Delay(sample_type initialDelayMs = sample_type{500}, 
+              sample_type initialFeedback = sample_type{0.5}, 
+              sample_type initialMix = sample_type{0.5})
         {
-            // Clamp initial values to valid ranges
-            delayMs = std::max (0.0f, std::min (delayMs.load(), MaxDelayTimeMs));
-            feedback = std::max (0.0f, std::min (feedback.load(), 1.0f));
-            mix = std::max (0.0f, std::min (mix.load(), 1.0f));
+            // Clamp initial values to valid ranges and store atomically
+            delayMs_.store(std::clamp(initialDelayMs, sample_type{0}, MaxDelayTimeMs), std::memory_order_relaxed);
+            feedback_.store(std::clamp(initialFeedback, sample_type{0}, sample_type{1}), std::memory_order_relaxed);
+            mix_.store(std::clamp(initialMix, sample_type{0}, sample_type{1}), std::memory_order_relaxed);
+            
+            // Initialize delay buffers for each channel
+            for (size_t ch = 0; ch < NumChannels; ++ch)
+            {
+                delayBuffers_[ch] = RingBuffer<sample_type>(1); // Will be resized in prepare()
+            }
         }
 
-        /**
-         * @brief Prepare the delay processor for playback
-         * 
-         * @param sampleRate The sample rate at which the processor will operate
-         * @param maxFramesPerBlock The maximum number of frames that will be processed at once
-         */
-        void prepare (double sampleRate, int /* maxFramesPerBlock */) override
+        void prepare_impl() noexcept
         {
             // Calculate the maximum number of samples needed for 2 seconds of delay
-            const auto maxDelaySamples = static_cast<size_t> (std::ceil (2.0 * sampleRate)) + 1;
+            constexpr size_t maxDelaySamples = static_cast<size_t>(std::ceil(2.0 * Base::sample_rate)) + 1;
 
-            // Resize the ring buffer to accommodate the maximum delay time
-            delayBuffer.resize (maxDelaySamples);
+            // Resize and clear all delay buffers
+            for (size_t ch = 0; ch < NumChannels; ++ch)
+            {
+                delayBuffers_[ch].resize(maxDelaySamples);
+                delayBuffers_[ch].clear();
+            }
 
-            // Clear the buffer
-            delayBuffer.clear();
-
-            // Calculate the delay in samples based on current delay time in ms
-            delaySamples = static_cast<int> ((delayMs / 1000.0f) * sampleRate);
+            updateDelaySamples();
         }
 
-        /**
-         * @brief Process audio data
-         * 
-         * @param buffer The buffer view containing the audio data to process
-         */
-        void process (BufferView& buffer) override
+        void process_audio_impl(AudioBuffer& buffer) noexcept
         {
-            const int numFrames = buffer.getNumFrames();
+            constexpr size_t numFrames = Base::block_size;
+            constexpr size_t numChannels = Base::num_channels;
 
-            // Process only the specified channel
-            float* channelData = buffer.getChannelPointer (channelIndex);
+            const sample_type currentFeedback = feedback_.load(std::memory_order_relaxed);
+            const sample_type currentMix = mix_.load(std::memory_order_relaxed);
+            const size_t currentDelaySamples = delaySamples_.load(std::memory_order_relaxed);
 
-            for (int i = 0; i < numFrames; ++i)
+            for (size_t ch = 0; ch < numChannels; ++ch)
             {
-                channelData[i] = getNextSample(channelData[i]);
+                auto& delayBuffer = delayBuffers_[ch];
+                
+                for (size_t i = 0; i < numFrames; ++i)
+                {
+                    const sample_type inputSample = buffer[ch][i];
+                    sample_type delaySample = sample_type{0};
+                    
+                    // Read the delayed sample
+                    delayBuffer.peekAt(delaySample, currentDelaySamples);
+
+                    // Calculate the output sample with dry/wet mix
+                    buffer[ch][i] = (sample_type{1} - currentMix) * inputSample + currentMix * delaySample;
+
+                    // Discard the oldest sample if the buffer is full
+                    if (delayBuffer.isFull())
+                    {
+                        delayBuffer.discard(1);
+                    }
+
+                    // Write input + feedback to the delay buffer
+                    delayBuffer.push(inputSample + currentFeedback * delaySample);
+                }
             }
         }
 
-        float getNextSample(float inputSample)
+        void process_control_impl() noexcept
         {
-            float delaySample = 0.0f;
-            
-            // Read the delayed sample
-            delayBuffer.peekAt(delaySample, delaySamples.load());
+            // Update delay samples if delay time has changed
+            updateDelaySamples();
+        }
 
-            // Calculate the output sample with dry/wet mix
-            const float outputSample = (1.0f - mix) * inputSample + mix * delaySample;
-
-            // Discard the oldest sample if the buffer is full
-            if (delayBuffer.isFull())
+        void reset_impl() noexcept
+        {
+            for (size_t ch = 0; ch < NumChannels; ++ch)
             {
-                delayBuffer.discard(1);
+                delayBuffers_[ch].clear();
             }
-
-            // Write input + feedback to the delay buffer
-            delayBuffer.push(inputSample + feedback * delaySample);
-
-            return outputSample;
         }
 
         /**
-         * @brief Reset the delay processor's internal state
-         */
-        void reset() override
-        {
-            delayBuffer.clear();
-        }
-
-        /**
-         * @brief Set the delay time in milliseconds
+         * @brief Set the delay time in milliseconds (thread-safe)
          * 
          * @param delayTimeMs The new delay time in milliseconds (0 to 2000)
          */
-        void setDelayTime(float delayTimeMs)
+        void setDelayTime(sample_type delayTimeMs) noexcept
         {
-            if(std::abs(delayTimeMs - delayMs.load()) < 0.001f)
-                return; // No change, avoid unnecessary updates
+            const sample_type currentDelayMs = delayMs_.load(std::memory_order_relaxed);
+            if (std::abs(delayTimeMs - currentDelayMs) < sample_type{0.001})
+                return; // No significant change
+                
             // Clamp to valid range
-            delayTimeMs = std::max(0.0f, std::min(delayTimeMs, MaxDelayTimeMs));
-            delayMs = delayTimeMs;
-
-            // Update delay samples if we have a valid sample rate
-            if (getSampleRate() > 0.0)
-            {
-                delaySamples = static_cast<size_t>(std::max(0.0f, (delayMs.load() / 1000.0f) * static_cast<float>(getSampleRate())));
-            }
+            delayTimeMs = std::clamp(delayTimeMs, sample_type{0}, MaxDelayTimeMs);
+            delayMs_.store(delayTimeMs, std::memory_order_relaxed);
         }
 
         /**
-         * @brief Set the feedback amount
+         * @brief Set the feedback amount (thread-safe)
          * 
          * @param feedbackAmount The new feedback amount (0.0 to 1.0)
          */
-        void setFeedback (float feedbackAmount)
+        void setFeedback(sample_type feedbackAmount) noexcept
         {
-            if (std::abs(feedbackAmount - feedback.load()) < 0.001f)
-                return; // No change, avoid unnecessary updates
+            const sample_type currentFeedback = feedback_.load(std::memory_order_relaxed);
+            if (std::abs(feedbackAmount - currentFeedback) < sample_type{0.001})
+                return; // No significant change
+                
             // Clamp to valid range
-            feedback = std::max (0.0f, std::min (feedbackAmount, 1.0f));
+            feedback_.store(std::clamp(feedbackAmount, sample_type{0}, sample_type{1}), 
+                           std::memory_order_relaxed);
         }
 
         /**
-         * @brief Set the dry/wet mix
+         * @brief Set the dry/wet mix (thread-safe)
          * 
          * @param mixAmount The new mix amount (0.0 = dry, 1.0 = wet)
          */
-        void setMix (float mixAmount)
+        void setMix(sample_type mixAmount) noexcept
         {
-            if (std::abs(mixAmount - mix.load()) < 0.001f)
-                return; // No change, avoid unnecessary updates
+            const sample_type currentMix = mix_.load(std::memory_order_relaxed);
+            if (std::abs(mixAmount - currentMix) < sample_type{0.001})
+                return; // No significant change
+                
             // Clamp to valid range
-            mix = std::max (0.0f, std::min (mixAmount, 1.0f));
-        }
-
-        /**
-         * @brief Set the current channel index
-         * 
-         * @param index The new channel index (0 or greater)
-         */
-        void setChannelIndex (int index)
-        {
-            if (index < 0)
-                index = 0;
-
-            channelIndex = index;
-        }
-
-        /**
-         * @brief Get the current channel index
-         * 
-         * @return int The current channel index
-         */
-        int getChannelIndex() const
-        {
-            return channelIndex;
+            mix_.store(std::clamp(mixAmount, sample_type{0}, sample_type{1}), 
+                      std::memory_order_relaxed);
         }
 
         /**
          * @brief Get the current delay time in milliseconds
-         * 
-         * @return float The current delay time in milliseconds
          */
-        float getDelayTime() const
+        sample_type getDelayTime() const noexcept
         {
-            return delayMs;
+            return delayMs_.load(std::memory_order_relaxed);
         }
 
         /**
          * @brief Get the current feedback amount
-         * 
-         * @return float The current feedback amount (0.0 to 1.0)
          */
-        float getFeedback() const
+        sample_type getFeedback() const noexcept
         {
-            return feedback;
+            return feedback_.load(std::memory_order_relaxed);
         }
 
         /**
          * @brief Get the current dry/wet mix
-         * 
-         * @return float The current mix amount (0.0 = dry, 1.0 = wet)
          */
-        float getMix() const
+        sample_type getMix() const noexcept
         {
-            return mix;
+            return mix_.load(std::memory_order_relaxed);
         }
 
     private:
-        std::atomic<float> delayMs; // Delay time in milliseconds
-        std::atomic<float> feedback; // Feedback amount (0.0 to 1.0)
-        std::atomic<float> mix; // Dry/wet mix (0.0 = dry, 1.0 = wet)
-        std::atomic<size_t> delaySamples{ 0 }; // Delay time in samples
-        std::atomic<int> channelIndex { 0 }; // Current channel index
+        void updateDelaySamples() noexcept
+        {
+            const sample_type currentDelayMs = delayMs_.load(std::memory_order_relaxed);
+            const size_t newDelaySamples = static_cast<size_t>(
+                std::max(sample_type{0}, (currentDelayMs / sample_type{1000}) * Base::sample_rate));
+            delaySamples_.store(newDelaySamples, std::memory_order_relaxed);
+        }
 
-        RingBuffer<float> delayBuffer; // The delay line buffer
+        // Thread-safe parameter storage
+        std::atomic<sample_type> delayMs_{sample_type{500}}; // Delay time in milliseconds
+        std::atomic<sample_type> feedback_{sample_type{0.5}}; // Feedback amount (0.0 to 1.0)
+        std::atomic<sample_type> mix_{sample_type{0.5}}; // Dry/wet mix (0.0 = dry, 1.0 = wet)
+        std::atomic<size_t> delaySamples_{0}; // Delay time in samples
+
+        // Per-channel delay buffers
+        std::array<RingBuffer<sample_type>, NumChannels> delayBuffers_;
     };
+    
+    // Common type aliases
+    using DelayF32 = Delay<float, 512, 44100, 2>;
+    using DelayF64 = Delay<double, 512, 44100, 2>;
 } // namespace PlayfulTones::DspToolBox

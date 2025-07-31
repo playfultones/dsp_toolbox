@@ -8,93 +8,180 @@
 #include "../processors/processor.h"
 #include <algorithm>
 #include <cmath>
+#include <atomic>
 
 namespace PlayfulTones::DspToolBox
 {
     /**
-     * @brief A simple gain processor with ramping capabilities.
+     * @brief High-performance gain processor with ramping capabilities using CRTP
      *
-     * This class implements a simple gain processor that can apply a gain factor to audio samples.
-     * It also supports ramping the gain over a specified duration.
+     * This class implements a high-performance gain processor that can apply a gain 
+     * factor to audio samples with smooth ramping to avoid clicks and pops.
+     * Uses compile-time optimization and lockless parameter updates.
+     * 
+     * @tparam SampleType The sample type (float, double)
+     * @tparam BlockSize Fixed block size for processing
+     * @tparam SampleRate Sample rate (compile-time constant)
+     * @tparam NumChannels Number of audio channels
      */
-    class Gain : public Processor
+    template<typename SampleType = float, 
+             size_t BlockSize = 512, 
+             size_t SampleRate = 44100,
+             size_t NumChannels = 2>
+    class Gain : public ProcessorBase<Gain<SampleType, BlockSize, SampleRate, NumChannels>,
+                                      SampleType, BlockSize, SampleRate, NumChannels>
     {
     public:
-        Gain() : gain_ (1.0f), targetGain_ (1.0f), rampLengthSeconds_ (0.0f), rampLengthSamples_ (0), currentRampSample_ (0) {}
-
-        void prepare (double /* sampleRate */, int /* maxFramesPerBlock */) override
+        using Base = ProcessorBase<Gain, SampleType, BlockSize, SampleRate, NumChannels>;
+        using AudioBuffer = typename Base::AudioBuffer;
+        using sample_type = SampleType;
+        
+        /**
+         * @brief Construct a new Gain processor
+         * @param initialGain Initial gain value
+         */
+        Gain(sample_type initialGain = sample_type{1}) 
+            : gain_(initialGain), targetGain_(initialGain)
         {
-            reset();
+            targetGain_.store(initialGain, std::memory_order_relaxed);
         }
 
-        void reset() override
+        void prepare_impl() noexcept
         {
-            gain_ = targetGain_;
+            reset_impl();
+        }
+
+        void reset_impl() noexcept
+        {
+            gain_ = targetGain_.load(std::memory_order_relaxed);
             currentRampSample_ = 0;
         }
 
-        void process (BufferView& buffer) override
+        void process_audio_impl(AudioBuffer& buffer) noexcept
         {
-            const auto numFrames = buffer.getNumFrames();
-            const auto numChannels = buffer.getNumChannels();
+            constexpr size_t numFrames = Base::block_size;
+            constexpr size_t numChannels = Base::num_channels;
 
-            if (rampLengthSamples_ > 0 && currentRampSample_ < rampLengthSamples_)
+            const sample_type targetGain = targetGain_.load(std::memory_order_relaxed);
+            const size_t rampLengthSamples = rampLengthSamples_.load(std::memory_order_relaxed);
+
+            if (rampLengthSamples > 0 && currentRampSample_ < rampLengthSamples && 
+                std::abs(targetGain - gain_) > sample_type{0.0001})
             {
                 // Process with gain ramping
-                float gainIncrement = (targetGain_ - gain_) / rampLengthSamples_;
-                for (int i = 0; i < numFrames; ++i)
+                const sample_type gainIncrement = (targetGain - gain_) / static_cast<sample_type>(rampLengthSamples);
+                
+                for (size_t i = 0; i < numFrames; ++i)
                 {
-                    if (currentRampSample_ < rampLengthSamples_)
+                    if (currentRampSample_ < rampLengthSamples)
                     {
                         gain_ += gainIncrement;
-                        currentRampSample_++;
+                        ++currentRampSample_;
                     }
 
-                    for (int ch = 0; ch < numChannels; ++ch)
+                    for (size_t ch = 0; ch < numChannels; ++ch)
                     {
-                        buffer.getChannelPointer (ch)[i] *= gain_;
+                        buffer[ch][i] *= gain_;
                     }
                 }
             }
             else
             {
-                // Process without ramping
-                for (int ch = 0; ch < numChannels; ++ch)
+                // Process without ramping (fast path)
+                gain_ = targetGain;
+                
+                for (size_t ch = 0; ch < numChannels; ++ch)
                 {
-                    auto* channelData = buffer.getChannelPointer (ch);
-                    for (int i = 0; i < numFrames; ++i)
+                    for (size_t i = 0; i < numFrames; ++i)
                     {
-                        channelData[i] *= gain_;
+                        buffer[ch][i] *= gain_;
                     }
                 }
             }
         }
 
-        void setGain (float newGain)
+        void process_control_impl() noexcept
         {
-            targetGain_ = newGain;
-            if (rampLengthSamples_ == 0)
+            // Control-rate processing - update ramp length if needed
+            const sample_type rampLengthSeconds = rampLengthSeconds_.load(std::memory_order_relaxed);
+            const size_t newRampLengthSamples = static_cast<size_t>(rampLengthSeconds * Base::sample_rate);
+            
+            if (newRampLengthSamples != rampLengthSamples_.load(std::memory_order_relaxed))
+            {
+                rampLengthSamples_.store(newRampLengthSamples, std::memory_order_relaxed);
+                currentRampSample_ = 0; // Reset ramp on length change
+            }
+        }
+
+        /**
+         * @brief Set the target gain value (thread-safe)
+         * @param newGain The new gain value
+         */
+        void setGain(sample_type newGain) noexcept
+        {
+            targetGain_.store(newGain, std::memory_order_relaxed);
+            
+            // If no ramping, apply immediately
+            if (rampLengthSamples_.load(std::memory_order_relaxed) == 0)
             {
                 gain_ = newGain;
             }
         }
 
-        void setGainRampLength (float seconds)
+        /**
+         * @brief Set the gain ramp length in seconds (thread-safe)
+         * @param seconds Ramp duration in seconds
+         */
+        void setGainRampLength(sample_type seconds) noexcept
         {
-            rampLengthSeconds_ = seconds;
-            rampLengthSamples_ = static_cast<int> (seconds * getSampleRate());
-            currentRampSample_ = 0;
+            rampLengthSeconds_.store(seconds, std::memory_order_relaxed);
         }
 
-        float getCurrentGain() const { return gain_; }
-        float getTargetGain() const { return targetGain_; }
-        float getRampLengthSeconds() const { return rampLengthSeconds_; }
+        /**
+         * @brief Get the current gain value
+         */
+        sample_type getCurrentGain() const noexcept
+        {
+            return gain_;
+        }
+
+        /**
+         * @brief Get the target gain value
+         */
+        sample_type getTargetGain() const noexcept
+        {
+            return targetGain_.load(std::memory_order_relaxed);
+        }
+
+        /**
+         * @brief Get the ramp length in seconds
+         */
+        sample_type getRampLengthSeconds() const noexcept
+        {
+            return rampLengthSeconds_.load(std::memory_order_relaxed);
+        }
+
+        /**
+         * @brief Check if ramping is currently active
+         */
+        bool isRamping() const noexcept
+        {
+            const size_t rampLength = rampLengthSamples_.load(std::memory_order_relaxed);
+            return rampLength > 0 && currentRampSample_ < rampLength;
+        }
 
     private:
-        float gain_;
-        float targetGain_;
-        float rampLengthSeconds_;
-        int rampLengthSamples_;
-        int currentRampSample_;
+        // Audio thread state (not atomic - only accessed from audio thread)
+        sample_type gain_{1};
+        size_t currentRampSample_{0};
+
+        // Thread-safe parameter storage
+        std::atomic<sample_type> targetGain_{sample_type{1}};
+        std::atomic<sample_type> rampLengthSeconds_{sample_type{0}};
+        std::atomic<size_t> rampLengthSamples_{0};
     };
+    
+    // Common type aliases
+    using GainF32 = Gain<float, 512, 44100, 2>;
+    using GainF64 = Gain<double, 512, 44100, 2>;
 } // namespace PlayfulTones::DspToolBox

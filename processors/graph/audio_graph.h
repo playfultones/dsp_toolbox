@@ -13,68 +13,96 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <span>
+#include <array>
 
 namespace PlayfulTones::DspToolBox
 {
     /**
-     * @brief Main audio processing graph with lock-free updates
+     * @brief High-performance template-based audio processing graph
      * 
-     * This class represents the audio processing graph and handles
-     * thread-safe, lock-free updates to the processing chain.
+     * This class represents the audio processing graph with compile-time optimization
+     * and lock-free updates for maximum real-time performance.
+     * 
+     * @tparam SampleType The sample type (float, double)
+     * @tparam BlockSize Fixed block size for processing
+     * @tparam SampleRate Sample rate
+     * @tparam NumChannels Number of audio channels
      */
-    class AudioGraph : public Processor
+    template<typename SampleType = float, 
+             size_t BlockSize = 512, 
+             size_t SampleRate = 44100,
+             size_t NumChannels = 2>
+    class AudioGraph : public ProcessorBase<AudioGraph<SampleType, BlockSize, SampleRate, NumChannels>,
+                                            SampleType, BlockSize, SampleRate, NumChannels>
     {
     public:
+        using Base = ProcessorBase<AudioGraph, SampleType, BlockSize, SampleRate, NumChannels>;
+        using AudioBuffer = typename Base::AudioBuffer;
+        using BuilderType = GraphBuilder<SampleType, BlockSize, SampleRate, NumChannels>;
+        using NodeType = AudioGraphNode<SampleType, BlockSize, SampleRate, NumChannels>;
+        using NodePtr = typename NodeType::Ptr;
+        using NodeId = typename NodeType::Id;
+        
         AudioGraph() = default;
 
         /**
-         * @brief Process audio through the graph
+         * @brief Process audio through the graph (hot path)
          * @param buffer The audio buffer to process
          */
-        void process (BufferView& buffer) override
+        void process_audio_impl(AudioBuffer& buffer) noexcept
         {
             // Get current render sequence - this is lock-free
-            RenderSequence* sequence = currentSequence.load (std::memory_order_acquire);
+            RenderSequence* sequence = currentSequence_.load(std::memory_order_acquire);
 
             if (sequence && !sequence->empty())
             {
-                // Process all nodes in the sequence
+                // Process nodes in sequence order (optimized path)
+                // Each node only processes itself, not the entire chain
                 for (const auto& node : *sequence)
                 {
                     if (node && node->getProcessor())
-                        node->getProcessor()->process (buffer);
+                    {
+                        node->getProcessor()->process_audio_erased(&buffer);
+                    }
                 }
             }
             else
             {
                 // Fall back to graph traversal if no sequence is available
-                std::unordered_map<AudioGraphNode::Id, bool> processedNodes;
-                builder.getOutputNode()->process (buffer, processedNodes);
+                std::unordered_map<NodeId, bool> processedNodes;
+                if (auto outputNode = builder_.getOutputNode())
+                {
+                    outputNode->processAudio(buffer, processedNodes);
+                }
             }
         }
 
         /**
-         * @brief Prepare the graph for processing
-         * @param sampleRate The sample rate
-         * @param maxFramesPerBlock The maximum number of frames per block
+         * @brief Process control-rate updates (cold path)
          */
-        void prepare (double newSampleRate, int newMaxFramesPerBlock) override
+        void process_control_impl() noexcept
         {
-            // Store these values for future builder updates
-            this->sampleRate = newSampleRate;
-            this->maxFramesPerBlock = newMaxFramesPerBlock;
+            std::lock_guard<std::mutex> lock(builderMutex_);
+            builder_.processControlAll();
+        }
 
-            std::lock_guard<std::mutex> lock (builderMutex);
-            builder.prepareAll (sampleRate, maxFramesPerBlock);
+        /**
+         * @brief Prepare the graph for processing
+         */
+        void prepare_impl() noexcept
+        {
+            std::lock_guard<std::mutex> lock(builderMutex_);
+            builder_.prepareAll();
         }
 
         /**
          * @brief Reset all nodes in the graph
          */
-        void reset() override
+        void reset_impl() noexcept
         {
-            std::lock_guard<std::mutex> lock (builderMutex);
-            builder.resetAll();
+            std::lock_guard<std::mutex> lock(builderMutex_);
+            builder_.resetAll();
         }
 
         /**
@@ -82,9 +110,9 @@ namespace PlayfulTones::DspToolBox
          * @return Reference to the graph builder
          * @note Always acquire the builder through this method to ensure thread safety
          */
-        GraphBuilder& getBuilder()
+        BuilderType& getBuilder()
         {
-            return builder;
+            return builder_;
         }
 
         /**
@@ -92,22 +120,22 @@ namespace PlayfulTones::DspToolBox
          */
         void applyChanges()
         {
-            std::lock_guard<std::mutex> lock (builderMutex);
+            std::lock_guard<std::mutex> lock(builderMutex_);
 
             // Prepare any new nodes that might have been added
-            builder.prepareAll (sampleRate, maxFramesPerBlock);
+            builder_.prepareAll();
 
-            RenderSequence* currentActiveSequence = currentSequence.load (std::memory_order_acquire);
+            RenderSequence* currentActiveSequence = currentSequence_.load(std::memory_order_acquire);
 
             // Determine which buffer to update (the one not currently in use)
             std::unique_ptr<RenderSequence>& inactiveBuffer =
-                (currentActiveSequence == sequenceA.get()) ? sequenceB : sequenceA;
+                (currentActiveSequence == sequenceA_.get()) ? sequenceB_ : sequenceA_;
 
             // Create a new sequence in the inactive buffer
-            inactiveBuffer = std::make_unique<RenderSequence> (builder.createRenderSequence());
+            inactiveBuffer = std::make_unique<RenderSequence>(builder_.createRenderSequence());
 
             // Atomically swap the current sequence pointer
-            currentSequence.store (inactiveBuffer.get(), std::memory_order_release);
+            currentSequence_.store(inactiveBuffer.get(), std::memory_order_release);
         }
 
         /**
@@ -115,35 +143,40 @@ namespace PlayfulTones::DspToolBox
          */
         void clear()
         {
-            std::lock_guard<std::mutex> lock (builderMutex);
+            std::lock_guard<std::mutex> lock(builderMutex_);
 
             // Clear the builder
-            builder.clear();
+            builder_.clear();
 
             // Reset sequence pointers
-            sequenceA.reset();
-            sequenceB.reset();
-            currentSequence.store (nullptr, std::memory_order_release);
+            sequenceA_.reset();
+            sequenceB_.reset();
+            currentSequence_.store(nullptr, std::memory_order_release);
         }
 
-    private:
-        using RenderSequence = std::vector<AudioGraphNode::Ptr>;
+        /**
+         * @brief Get compile-time configuration
+         */
+        static constexpr size_t getBlockSize() { return BlockSize; }
+        static constexpr size_t getSampleRate() { return SampleRate; }
+        static constexpr size_t getNumChannels() { return NumChannels; }
 
-        GraphBuilder builder;
-        std::atomic<RenderSequence*> currentSequence { nullptr };
-        static_assert (std::atomic<RenderSequence*>::is_always_lock_free,
+    private:
+        using RenderSequence = std::vector<NodePtr>;
+
+        BuilderType builder_;
+        std::atomic<RenderSequence*> currentSequence_{nullptr};
+        static_assert(std::atomic<RenderSequence*>::is_always_lock_free,
             "std::atomic<RenderSequence*> must be lock-free for real-time audio processing");
 
-        // Buffers for the render sequence.
-        // These are used to avoid lock contention when applying changes
-        // to the graph while processing.
-        // The current sequence is always in use, while the other is being built.
-        std::unique_ptr<RenderSequence> sequenceA;
-        std::unique_ptr<RenderSequence> sequenceB;
+        // Double-buffered render sequences for lock-free updates
+        std::unique_ptr<RenderSequence> sequenceA_;
+        std::unique_ptr<RenderSequence> sequenceB_;
 
-        std::mutex builderMutex; // Only used when modifying the graph structure
-
-        double sampleRate = 44100.0;
-        int maxFramesPerBlock = 512;
+        std::mutex builderMutex_; // Only used when modifying the graph structure
     };
+    
+    // Common type aliases
+    using AudioGraphF32 = AudioGraph<float, 512, 44100, 2>;
+    using AudioGraphF64 = AudioGraph<double, 512, 44100, 2>;
 }

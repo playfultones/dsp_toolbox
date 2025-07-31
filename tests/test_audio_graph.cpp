@@ -24,79 +24,151 @@
 
 using namespace PlayfulTones::DspToolBox;
 
-// Mock processor for testing
-class MockProcessor : public Processor
+// Mock processor for testing using new CRTP architecture
+template <typename SampleType = float,
+    size_t BlockSize = 512,
+    size_t SampleRate = 44100,
+    size_t NumChannels = 2>
+class MockProcessor : public ProcessorBase<MockProcessor<SampleType, BlockSize, SampleRate, NumChannels>,
+                          SampleType,
+                          BlockSize,
+                          SampleRate,
+                          NumChannels>
 {
 public:
+    using Base = ProcessorBase<MockProcessor, SampleType, BlockSize, SampleRate, NumChannels>;
+    using AudioBuffer = typename Base::AudioBuffer;
+    using sample_type = SampleType;
+
     MockProcessor() = default;
 
-    void prepare (double newSampleRate, int maxFramesPerBlock) override
+    void prepare_impl() noexcept
     {
-        this->sampleRate = newSampleRate;
-        this->maxBlockSize = maxFramesPerBlock;
-        prepared = true;
+        prepared_ = true;
     }
 
-    void process (BufferView& buffer) override
+    void process_audio_impl (AudioBuffer& buffer) noexcept
     {
-        processCallCount++;
-        lastProcessedChannels = buffer.getNumChannels();
-        lastProcessedFrames = buffer.getNumFrames();
+        processCallCount_++;
+        lastProcessedChannels_ = Base::num_channels;
+        lastProcessedFrames_ = Base::block_size;
 
         // Optional processing behavior for testing
-        if (processingBehavior)
-            processingBehavior (buffer);
+        if (processingBehavior_)
+            processingBehavior_ (buffer);
     }
 
-    void reset() override
+    void reset_impl() noexcept
     {
-        resetCallCount++;
-        prepared = false;
+        resetCallCount_++;
+        prepared_ = false;
     }
 
-    bool wasPrepared() const { return prepared; }
-    int getProcessCallCount() const { return processCallCount; }
-    int getResetCallCount() const { return resetCallCount; }
-    int getLastProcessedChannels() const { return lastProcessedChannels; }
-    int getLastProcessedFrames() const { return lastProcessedFrames; }
+    void process_control_impl() noexcept
+    {
+        // No control processing needed for mock
+    }
+
+    bool wasPrepared() const { return prepared_; }
+    int getProcessCallCount() const { return processCallCount_; }
+    int getResetCallCount() const { return resetCallCount_; }
+    size_t getLastProcessedChannels() const { return lastProcessedChannels_; }
+    size_t getLastProcessedFrames() const { return lastProcessedFrames_; }
 
     // For configuring test behavior
-    void setProcessingBehavior (std::function<void (BufferView&)> behavior)
+    void setProcessingBehavior (std::function<void (AudioBuffer&)> behavior)
     {
-        processingBehavior = std::move (behavior);
+        processingBehavior_ = std::move (behavior);
     }
 
 private:
-    bool prepared = false;
-    int processCallCount = 0;
-    int resetCallCount = 0;
-    int lastProcessedChannels = 0;
-    int lastProcessedFrames = 0;
-    double sampleRate = 0.0;
-    int maxBlockSize = 0;
-    std::function<void (BufferView&)> processingBehavior;
+    std::atomic<bool> prepared_ { false };
+    std::atomic<int> processCallCount_ { 0 };
+    std::atomic<int> resetCallCount_ { 0 };
+    std::atomic<size_t> lastProcessedChannels_ { 0 };
+    std::atomic<size_t> lastProcessedFrames_ { 0 };
+    std::function<void (AudioBuffer&)> processingBehavior_;
 };
 
 // Mock processor that can be bypassed
-class BypassableProcessor : public MockProcessor
+template <typename SampleType = float,
+    size_t BlockSize = 512,
+    size_t SampleRate = 44100,
+    size_t NumChannels = 2>
+class BypassableProcessor : public ProcessorBase<BypassableProcessor<SampleType, BlockSize, SampleRate, NumChannels>,
+                                SampleType,
+                                BlockSize,
+                                SampleRate,
+                                NumChannels>
 {
 public:
-    BypassableProcessor() : bypassed (false) {}
+    using Base = ProcessorBase<BypassableProcessor, SampleType, BlockSize, SampleRate, NumChannels>;
+    using AudioBuffer = typename Base::AudioBuffer;
+    using sample_type = SampleType;
 
-    void process (BufferView& buffer) override
+    BypassableProcessor() = default;
+
+    void prepare_impl() noexcept
     {
-        if (!bypassed)
+        prepared_ = true;
+    }
+
+    void process_audio_impl (AudioBuffer& buffer) noexcept
+    {
+        if (!bypassed_.load (std::memory_order_relaxed))
         {
-            MockProcessor::process (buffer);
+            processCallCount_++;
+            lastProcessedChannels_ = Base::num_channels;
+            lastProcessedFrames_ = Base::block_size;
+
+            // Optional processing behavior for testing
+            if (processingBehavior_)
+                processingBehavior_ (buffer);
         }
     }
 
-    void setBypassed (bool shouldBypass) { bypassed = shouldBypass; }
-    bool isBypassed() const { return bypassed; }
+    void reset_impl() noexcept
+    {
+        resetCallCount_++;
+        prepared_ = false;
+    }
+
+    void process_control_impl() noexcept
+    {
+        // No control processing needed for mock
+    }
+
+    bool wasPrepared() const { return prepared_; }
+    int getProcessCallCount() const { return processCallCount_; }
+    int getResetCallCount() const { return resetCallCount_; }
+    size_t getLastProcessedChannels() const { return lastProcessedChannels_; }
+    size_t getLastProcessedFrames() const { return lastProcessedFrames_; }
+
+    // For configuring test behavior
+    void setProcessingBehavior (std::function<void (AudioBuffer&)> behavior)
+    {
+        processingBehavior_ = std::move (behavior);
+    }
+
+    void setBypassed (bool shouldBypass) { bypassed_.store (shouldBypass, std::memory_order_relaxed); }
+    bool isBypassed() const { return bypassed_.load (std::memory_order_relaxed); }
 
 private:
-    bool bypassed;
+    std::atomic<bool> prepared_ { false };
+    std::atomic<int> processCallCount_ { 0 };
+    std::atomic<int> resetCallCount_ { 0 };
+    std::atomic<size_t> lastProcessedChannels_ { 0 };
+    std::atomic<size_t> lastProcessedFrames_ { 0 };
+    std::function<void (AudioBuffer&)> processingBehavior_;
+    std::atomic<bool> bypassed_ { false };
 };
+
+// Type aliases for convenience
+using MockProcessorF32 = MockProcessor<float, 512, 44100, 2>;
+using BypassableProcessorF32 = BypassableProcessor<float, 512, 44100, 2>;
+using GraphBuilderF32 = GraphBuilder<float, 512, 44100, 2>;
+using AudioProcessorGraphF32 = AudioProcessorGraph<float, 512, 44100, 2>;
+using GainF32 = Gain<float, 512, 44100, 2>;
 
 // ======== 1. NODE CREATION TESTS ========
 
@@ -105,16 +177,15 @@ void testNodeCreation()
     std::cout << "Testing node creation..." << std::endl;
 
     // Test valid node creation
-    GraphBuilder builder;
-
-    // Create node with unique processor
-    auto proc1 = std::make_unique<MockProcessor>();
-    auto node1 = builder.addNode (std::move (proc1));
-    assert (node1 != nullptr && "Node creation should succeed with valid processor");
-    assert (node1->getId() > 0 && "Node should have a valid ID");
+    GraphBuilderF32 builder;
 
     // Create node with template method
-    auto node2 = builder.addNode<MockProcessor>();
+    auto node1 = builder.addNode<MockProcessorF32>();
+    assert (node1 != nullptr && "Node creation should succeed with template method");
+    assert (node1->getId() > 0 && "Node should have a valid ID");
+
+    // Create another node
+    auto node2 = builder.addNode<MockProcessorF32>();
     assert (node2 != nullptr && "Node creation should succeed with template method");
     assert (node2->getId() != node1->getId() && "Nodes should have unique IDs");
 
@@ -134,12 +205,12 @@ void testConnectionManagement()
 {
     std::cout << "Testing connection management..." << std::endl;
 
-    GraphBuilder builder;
+    GraphBuilderF32 builder;
 
     // Create nodes
-    auto node1 = builder.addNode<MockProcessor>();
-    auto node2 = builder.addNode<MockProcessor>();
-    auto node3 = builder.addNode<MockProcessor>();
+    auto node1 = builder.addNode<MockProcessorF32>();
+    auto node2 = builder.addNode<MockProcessorF32>();
+    auto node3 = builder.addNode<MockProcessorF32>();
 
     // Test valid connection
     bool connected = builder.connect (node1->getId(), node2->getId());
@@ -179,53 +250,48 @@ void testRoutingAndBufferHandling()
 {
     std::cout << "Testing routing and buffer handling..." << std::endl;
 
-    const int numChannels = 2;
-    const int numFrames = 512;
+    constexpr size_t numChannels = 2;
+    constexpr size_t numFrames = 512;
 
-    AudioProcessorGraph graph;
+    AudioProcessorGraphF32 graph;
 
     // Create processors that will modify the buffer in specific ways
-    auto gainNode1Id = graph.addProcessor<Gain>();
-    auto gainNode2Id = graph.addProcessor<Gain>();
-
-    // Configure gain processors
-    if (auto* gain1 = graph.getProcessor<Gain> (gainNode1Id))
-        gain1->setGain (0.5f);
-
-    if (auto* gain2 = graph.getProcessor<Gain> (gainNode2Id))
-        gain2->setGain (2.0f);
+    auto gainNode1Id = graph.addProcessor<GainF32> (0.5f);
+    auto gainNode2Id = graph.addProcessor<GainF32> (2.0f);
 
     // Connect in series to create a chain
     graph.connect (gainNode1Id, gainNode2Id);
     graph.connect (gainNode2Id, graph.getOutputNode()->getId());
 
     // Prepare the graph
-    graph.prepare (44100.0, numFrames);
+    graph.prepare();
 
-    // Create a buffer and fill with known values
-    AudioBuffer buffer (numChannels, numFrames);
-    for (int ch = 0; ch < numChannels; ++ch)
+    // Create template-based audio buffer
+    std::array<std::array<float, numFrames>, numChannels> bufferData;
+
+    // Initialize buffer spans and fill with known values
+    AudioProcessorGraphF32::AudioBuffer buffer {
+        std::span<float, numFrames> (bufferData[0]),
+        std::span<float, numFrames> (bufferData[1])
+    };
+    for (size_t ch = 0; ch < numChannels; ++ch)
     {
-        auto* channelData = buffer.getChannelPointer (ch);
-        for (int i = 0; i < numFrames; ++i)
+        for (size_t i = 0; i < numFrames; ++i)
         {
-            channelData[i] = 1.0f; // Fill with ones
+            buffer[ch][i] = 1.0f; // Fill with ones
         }
     }
 
     // Process the buffer
-    BufferView view;
-    view.setData (buffer.getArrayOfChannels(), numChannels, numFrames);
-    graph.process (view);
+    graph.process_audio (buffer);
 
     // Verify the processing: 1.0 * 0.5 * 2.0 = 1.0
-    for (int ch = 0; ch < numChannels; ++ch)
+    for (size_t ch = 0; ch < numChannels; ++ch)
     {
-        auto* channelData = buffer.getChannelPointer (ch);
         bool allCorrect = true;
-        for (int i = 0; i < numFrames; ++i)
+        for (size_t i = 0; i < numFrames; ++i)
         {
-            if (std::abs (channelData[i] - 1.0f) >= 0.00001f)
+            if (std::abs (buffer[ch][i] - 1.0f) >= 0.00001f)
             {
                 allCorrect = false;
                 break;
@@ -243,76 +309,92 @@ void testBasicSignalFlow()
 {
     std::cout << "Testing basic signal flow..." << std::endl;
 
-    constexpr auto kGain = 0.5f;
-    const int numChannels = 2;
-    const double sampleRate = 44100.0;
-    const int numFrames = static_cast<int> (sampleRate); // 1 second of audio
-
-    // Create audio buffers
-    AudioBuffer audioBuffer (numChannels, numFrames);
-    AudioBuffer expectedBuffer (numChannels, numFrames);
+    constexpr float kGain = 0.5f;
+    constexpr size_t numChannels = 2;
+    constexpr size_t numFrames = 512; // Use block size for template compatibility
 
     // Create audio processor graph
-    AudioProcessorGraph graph;
+    AudioProcessorGraphF32 graph;
 
     // Add a gain processor node and get its ID
-    auto gainNodeId = graph.addProcessor<Gain>();
-
-    // Get the gain processor and set its gain
-    if (auto* gain = graph.getProcessor<Gain> (gainNodeId))
-        gain->setGain (kGain);
-    else
-        throw std::runtime_error ("Failed to get Gain processor");
+    auto gainNodeId = graph.addProcessor<GainF32> (kGain);
 
     // Connect gain to output
     graph.connect (gainNodeId, graph.getOutputNode()->getId());
 
     // Prepare graph
-    graph.prepare (sampleRate, numFrames);
+    graph.prepare();
 
-    // Fill buffer with white noise
-    generateWhiteNoise (audioBuffer.getArrayOfChannels(), numChannels, numFrames, 1.0f);
+    // Create template-based audio buffers
+    std::array<std::array<float, numFrames>, numChannels> audioBufferData;
+    std::array<std::array<float, numFrames>, numChannels> expectedBufferData;
+    std::array<std::array<float, numFrames>, numChannels> originalBufferData;
 
-    // Copy to expected buffer and apply gain
-    for (int ch = 0; ch < numChannels; ++ch)
+    // Initialize buffer spans
+    AudioProcessorGraphF32::AudioBuffer audioBuffer {
+        std::span<float, numFrames> (audioBufferData[0]),
+        std::span<float, numFrames> (audioBufferData[1])
+    };
+    AudioProcessorGraphF32::AudioBuffer expectedBuffer {
+        std::span<float, numFrames> (expectedBufferData[0]),
+        std::span<float, numFrames> (expectedBufferData[1])
+    };
+    AudioProcessorGraphF32::AudioBuffer originalBuffer {
+        std::span<float, numFrames> (originalBufferData[0]),
+        std::span<float, numFrames> (originalBufferData[1])
+    };
+
+    // Fill buffer with white noise using raw pointers for compatibility
+    std::array<float*, numChannels> rawPointers;
+    for (size_t ch = 0; ch < numChannels; ++ch)
     {
-        const auto* srcData = audioBuffer.getChannelPointer (ch);
-        auto* dstData = expectedBuffer.getChannelPointer (ch);
-        for (int i = 0; i < numFrames; ++i)
-            dstData[i] = srcData[i] * kGain;
+        rawPointers[ch] = audioBufferData[ch].data();
+    }
+    generateWhiteNoise (rawPointers.data(), numChannels, numFrames, 1.0f);
+
+    // Copy to expected buffer and apply gain, also make original copy
+    for (size_t ch = 0; ch < numChannels; ++ch)
+    {
+        for (size_t i = 0; i < numFrames; ++i)
+        {
+            originalBuffer[ch][i] = audioBuffer[ch][i];
+            expectedBuffer[ch][i] = audioBuffer[ch][i] * kGain;
+        }
     }
 
-    // Make a copy of the original buffer before processing
-    AudioBuffer originalBuffer (numChannels, numFrames);
-    for (int ch = 0; ch < numChannels; ++ch)
+    // Process the audio buffer
+    graph.process_audio (audioBuffer);
+
+    // Verify gain was applied correctly
+    bool allSamplesCorrect = true;
+    for (size_t ch = 0; ch < numChannels; ++ch)
     {
-        std::memcpy (originalBuffer.getChannelPointer (ch),
-            audioBuffer.getChannelPointer (ch),
-            numFrames * sizeof (float));
+        for (size_t i = 0; i < numFrames; ++i)
+        {
+            if (std::abs (audioBuffer[ch][i] - expectedBuffer[ch][i]) >= 0.00001f)
+            {
+                allSamplesCorrect = false;
+                break;
+            }
+        }
+        if (!allSamplesCorrect)
+            break;
     }
-
-    // Process using BufferView
-    BufferView view;
-    view.setData (audioBuffer.getArrayOfChannels(), numChannels, numFrames);
-    graph.process (view);
-
-    // Verify gain was applied correctly using the buffer validator
-    bool allSamplesCorrect = compareAudioBuffers (audioBuffer, expectedBuffer);
 
     // Debug output for first few samples if test fails
     if (!allSamplesCorrect)
     {
         std::cerr << "First few samples comparison:" << std::endl;
-        for (int i = 0; i < std::min (10, numFrames); ++i)
+        for (size_t i = 0; i < std::min (static_cast<size_t> (10), numFrames); ++i)
         {
-            std::cerr << "Sample " << i << ": Original=" << originalBuffer.getChannelPointer (0)[i]
-                      << ", Expected=" << expectedBuffer.getChannelPointer (0)[i]
-                      << ", Got=" << audioBuffer.getChannelPointer (0)[i] << std::endl;
+            std::cerr << "Sample " << i << ": Original=" << originalBuffer[0][i]
+                      << ", Expected=" << expectedBuffer[0][i]
+                      << ", Got=" << audioBuffer[0][i] << std::endl;
         }
     }
 
     assert (allSamplesCorrect && "All samples should be exactly half of the original values");
-    std::cout << "Basic signal flow test passed for 1 second of audio!" << std::endl;
+    std::cout << "Basic signal flow test passed!" << std::endl;
 }
 
 // ======== 5. MULTI-NODE SIGNAL FLOW TEST ========
@@ -321,58 +403,73 @@ void testMultiNodeSignalFlow()
 {
     std::cout << "Testing multi-node signal flow..." << std::endl;
 
-    const int numChannels = 2;
-    const double sampleRate = 44100.0;
-    const int numFrames = static_cast<int> (sampleRate); // 1 second of audio
-
-    // Create audio buffers
-    AudioBuffer audioBuffer (numChannels, numFrames);
-    AudioBuffer expectedBuffer (numChannels, numFrames);
+    constexpr size_t numChannels = 2;
+    constexpr size_t numFrames = 512;
 
     // Create audio processor graph
-    AudioProcessorGraph graph;
+    AudioProcessorGraphF32 graph;
 
     // Add two gain processor nodes in series
-    auto gainNode1Id = graph.addProcessor<Gain>();
-    auto gainNode2Id = graph.addProcessor<Gain>();
+    auto gainNode1Id = graph.addProcessor<GainF32> (0.8f);
+    auto gainNode2Id = graph.addProcessor<GainF32> (0.625f);
 
     // Connect the nodes
     graph.connect (gainNode1Id, gainNode2Id);
     graph.connect (gainNode2Id, graph.getOutputNode()->getId());
 
-    // Get the gain processors and set their gains
-    if (auto* gain1 = graph.getProcessor<Gain> (gainNode1Id))
-        gain1->setGain (0.8f);
-    else
-        throw std::runtime_error ("Failed to get first Gain processor");
-
-    if (auto* gain2 = graph.getProcessor<Gain> (gainNode2Id))
-        gain2->setGain (0.625f);
-    else
-        throw std::runtime_error ("Failed to get second Gain processor");
-
     // Prepare graph
-    graph.prepare (sampleRate, numFrames);
+    graph.prepare();
 
-    // Fill buffer with white noise
-    generateWhiteNoise (audioBuffer.getArrayOfChannels(), numChannels, numFrames, 1.0f);
+    // Create template-based audio buffers
+    std::array<std::array<float, numFrames>, numChannels> audioBufferData;
+    std::array<std::array<float, numFrames>, numChannels> expectedBufferData;
+
+    // Initialize buffer spans
+    AudioProcessorGraphF32::AudioBuffer audioBuffer {
+        std::span<float, numFrames> (audioBufferData[0]),
+        std::span<float, numFrames> (audioBufferData[1])
+    };
+    AudioProcessorGraphF32::AudioBuffer expectedBuffer {
+        std::span<float, numFrames> (expectedBufferData[0]),
+        std::span<float, numFrames> (expectedBufferData[1])
+    };
+
+    // Fill buffer with white noise using raw pointers for compatibility
+    std::array<float*, numChannels> rawPointers;
+    for (size_t ch = 0; ch < numChannels; ++ch)
+    {
+        rawPointers[ch] = audioBufferData[ch].data();
+    }
+    generateWhiteNoise (rawPointers.data(), numChannels, numFrames, 1.0f);
 
     // Copy to expected buffer and apply both gains (0.8 * 0.625 = 0.5)
-    for (int ch = 0; ch < numChannels; ++ch)
+    for (size_t ch = 0; ch < numChannels; ++ch)
     {
-        const auto* srcData = audioBuffer.getChannelPointer (ch);
-        auto* dstData = expectedBuffer.getChannelPointer (ch);
-        for (int i = 0; i < numFrames; ++i)
-            dstData[i] = srcData[i] * 0.8f * 0.625f;
+        for (size_t i = 0; i < numFrames; ++i)
+        {
+            expectedBuffer[ch][i] = audioBuffer[ch][i] * 0.8f * 0.625f;
+        }
     }
 
-    // Process using BufferView
-    BufferView view;
-    view.setData (audioBuffer.getArrayOfChannels(), numChannels, numFrames);
-    graph.process (view);
+    // Process the audio buffer
+    graph.process_audio (audioBuffer);
 
     // Verify gain was applied correctly
-    bool allSamplesCorrect = compareAudioBuffers (audioBuffer, expectedBuffer);
+    bool allSamplesCorrect = true;
+    for (size_t ch = 0; ch < numChannels; ++ch)
+    {
+        for (size_t i = 0; i < numFrames; ++i)
+        {
+            if (std::abs (audioBuffer[ch][i] - expectedBuffer[ch][i]) >= 0.00001f)
+            {
+                allSamplesCorrect = false;
+                break;
+            }
+        }
+        if (!allSamplesCorrect)
+            break;
+    }
+
     assert (allSamplesCorrect && "Samples should have both gains applied");
     std::cout << "Multi-node signal flow test passed!" << std::endl;
     markUsed (allSamplesCorrect);
@@ -384,13 +481,13 @@ void testTopologyUpdates()
 {
     std::cout << "Testing topology updates..." << std::endl;
 
-    AudioProcessorGraph graph;
+    AudioProcessorGraphF32 graph;
 
     // Create a more complex graph
-    auto nodeA = graph.addProcessor<MockProcessor>();
-    auto nodeB = graph.addProcessor<MockProcessor>();
-    auto nodeC = graph.addProcessor<MockProcessor>();
-    auto nodeD = graph.addProcessor<MockProcessor>();
+    auto nodeA = graph.addProcessor<MockProcessorF32>();
+    auto nodeB = graph.addProcessor<MockProcessorF32>();
+    auto nodeC = graph.addProcessor<MockProcessorF32>();
+    auto nodeD = graph.addProcessor<MockProcessorF32>();
 
     // Set up initial connections: A->B->D->Output, A->C->D
     graph.connect (nodeA, nodeB);
@@ -399,23 +496,35 @@ void testTopologyUpdates()
     graph.connect (nodeC, nodeD);
     graph.connect (nodeD, graph.getOutputNode()->getId());
 
-    // Prepare and check processing
-    const int numChannels = 1;
-    const int numFrames = 256;
-    graph.prepare (44100.0, numFrames);
+    // Prepare the graph
+    graph.prepare();
 
-    AudioBuffer buffer (numChannels, numFrames);
-    BufferView view;
-    view.setData (buffer.getArrayOfChannels(), numChannels, numFrames);
+    // Create template-based audio buffer
+    constexpr size_t numChannels = 2;
+    constexpr size_t numFrames = 512;
+    std::array<std::array<float, numFrames>, numChannels> bufferData;
+
+    AudioProcessorGraphF32::AudioBuffer buffer {
+        std::span<float, numFrames> (bufferData[0]),
+        std::span<float, numFrames> (bufferData[1])
+    };
+    for (size_t ch = 0; ch < numChannels; ++ch)
+    {
+        // Fill with test data
+        for (size_t i = 0; i < numFrames; ++i)
+        {
+            buffer[ch][i] = 1.0f;
+        }
+    }
 
     // Process initial graph
-    graph.process (view);
+    graph.process_audio (buffer);
 
     // Verify each processor was called exactly once
-    auto* procA = graph.getProcessor<MockProcessor> (nodeA);
-    auto* procB = graph.getProcessor<MockProcessor> (nodeB);
-    auto* procC = graph.getProcessor<MockProcessor> (nodeC);
-    auto* procD = graph.getProcessor<MockProcessor> (nodeD);
+    auto* procA = graph.getProcessor<MockProcessorF32> (nodeA);
+    auto* procB = graph.getProcessor<MockProcessorF32> (nodeB);
+    auto* procC = graph.getProcessor<MockProcessorF32> (nodeC);
+    auto* procD = graph.getProcessor<MockProcessorF32> (nodeD);
 
     assert (procA->getProcessCallCount() == 1 && "ProcessorA should be called once");
     assert (procB->getProcessCallCount() == 1 && "ProcessorB should be called once");
@@ -429,7 +538,7 @@ void testTopologyUpdates()
     graph.connect (nodeA, nodeD);
 
     // Process with new topology
-    graph.process (view);
+    graph.process_audio (buffer);
 
     // Verify call counts after topology change
     assert (procA->getProcessCallCount() == 2 && "ProcessorA should be called again");
@@ -440,31 +549,42 @@ void testTopologyUpdates()
     std::cout << "Topology updates tests passed!" << std::endl;
 }
 
-// ======== 5. CONCURRENCY SAFETY TESTS ========
+// ======== 7. CONCURRENCY SAFETY TESTS ========
 
 void testConcurrencySafety()
 {
     std::cout << "Testing concurrency safety..." << std::endl;
 
-    AudioProcessorGraph graph;
+    AudioProcessorGraphF32 graph;
 
     // Create initial nodes
-    auto nodeA = graph.addProcessor<MockProcessor>();
-    auto nodeB = graph.addProcessor<MockProcessor>();
+    auto nodeA = graph.addProcessor<MockProcessorF32>();
+    auto nodeB = graph.addProcessor<MockProcessorF32>();
 
     // Connect to output
     graph.connect (nodeA, nodeB);
     graph.connect (nodeB, graph.getOutputNode()->getId());
 
     // Prepare graph
-    const int numChannels = 2;
-    const int numFrames = 256;
-    graph.prepare (44100.0, numFrames);
+    graph.prepare();
 
     // Create buffer for processing
-    AudioBuffer buffer (numChannels, numFrames);
-    BufferView view;
-    view.setData (buffer.getArrayOfChannels(), numChannels, numFrames);
+    constexpr size_t numChannels = 2;
+    constexpr size_t numFrames = 512;
+    std::array<std::array<float, numFrames>, numChannels> bufferData;
+
+    AudioProcessorGraphF32::AudioBuffer buffer {
+        std::span<float, numFrames> (bufferData[0]),
+        std::span<float, numFrames> (bufferData[1])
+    };
+    for (size_t ch = 0; ch < numChannels; ++ch)
+    {
+        // Fill with test data
+        for (size_t i = 0; i < numFrames; ++i)
+        {
+            buffer[ch][i] = 1.0f;
+        }
+    }
 
     // Flag to stop audio thread
     std::atomic<bool> shouldStop { false };
@@ -473,7 +593,7 @@ void testConcurrencySafety()
     std::thread audioThread ([&]() {
         while (!shouldStop)
         {
-            graph.process (view);
+            graph.process_audio (buffer);
             // Simulate audio thread timing
             std::this_thread::sleep_for (std::chrono::milliseconds (5));
         }
@@ -483,7 +603,7 @@ void testConcurrencySafety()
     for (int i = 0; i < 20; i++)
     {
         // Add new node
-        auto nodeC = graph.addProcessor<MockProcessor>();
+        auto nodeC = graph.addProcessor<MockProcessorF32>();
 
         // Change connections
         graph.disconnect (nodeA, nodeB);
@@ -512,23 +632,23 @@ void testConcurrencySafety()
     std::cout << "Concurrency safety tests passed!" << std::endl;
 }
 
-// ======== 6. CHAIN OF RESPONSIBILITY WORKFLOW TESTS ========
+// ======== 8. CHAIN OF RESPONSIBILITY WORKFLOW TESTS ========
 
 void testChainOfResponsibility()
 {
     std::cout << "Testing chain of responsibility workflow..." << std::endl;
 
-    AudioProcessorGraph graph;
+    AudioProcessorGraphF32 graph;
 
     // Create processors with specific behaviors
-    auto nodeA = graph.addProcessor<BypassableProcessor>();
-    auto nodeB = graph.addProcessor<MockProcessor>();
-    auto nodeC = graph.addProcessor<BypassableProcessor>();
+    auto nodeA = graph.addProcessor<BypassableProcessorF32>();
+    auto nodeB = graph.addProcessor<MockProcessorF32>();
+    auto nodeC = graph.addProcessor<BypassableProcessorF32>();
 
     // Set up processing behaviors
-    auto* procA = graph.getProcessor<BypassableProcessor> (nodeA);
-    auto* procB = graph.getProcessor<MockProcessor> (nodeB);
-    auto* procC = graph.getProcessor<BypassableProcessor> (nodeC);
+    auto* procA = graph.getProcessor<BypassableProcessorF32> (nodeA);
+    auto* procB = graph.getProcessor<MockProcessorF32> (nodeB);
+    auto* procC = graph.getProcessor<BypassableProcessorF32> (nodeC);
     markUsed (procA, procB, procC);
 
     // Set up a processing chain: A->B->C->Output
@@ -537,27 +657,31 @@ void testChainOfResponsibility()
     graph.connect (nodeC, graph.getOutputNode()->getId());
 
     // Prepare the graph
-    const int numChannels = 1;
-    const int numFrames = 256;
-    graph.prepare (44100.0, numFrames);
+    graph.prepare();
 
     // Create a test buffer
-    AudioBuffer buffer (numChannels, numFrames);
-    // Fill with known values
-    for (int i = 0; i < numFrames; ++i)
-    {
-        buffer.getChannelPointer (0)[i] = 1.0f;
-    }
+    constexpr size_t numChannels = 2;
+    constexpr size_t numFrames = 512;
+    std::array<std::array<float, numFrames>, numChannels> bufferData;
 
-    // Set up the buffer view
-    BufferView view;
-    view.setData (buffer.getArrayOfChannels(), numChannels, numFrames);
+    AudioProcessorGraphF32::AudioBuffer buffer {
+        std::span<float, numFrames> (bufferData[0]),
+        std::span<float, numFrames> (bufferData[1])
+    };
+    for (size_t ch = 0; ch < numChannels; ++ch)
+    {
+        // Fill with known values
+        for (size_t i = 0; i < numFrames; ++i)
+        {
+            buffer[ch][i] = 1.0f;
+        }
+    }
 
     // Test 1: All processors active
     procA->setBypassed (false);
     procC->setBypassed (false);
 
-    graph.process (view);
+    graph.process_audio (buffer);
 
     assert (procA->getProcessCallCount() == 1 && "ProcessorA should be called");
     assert (procB->getProcessCallCount() == 1 && "ProcessorB should be called");
@@ -566,7 +690,7 @@ void testChainOfResponsibility()
     // Test 2: A bypassed
     procA->setBypassed (true);
 
-    graph.process (view);
+    graph.process_audio (buffer);
 
     assert (procA->getProcessCallCount() == 1 && "Bypassed ProcessorA should not be called");
     assert (procB->getProcessCallCount() == 2 && "ProcessorB should be called again");
@@ -575,7 +699,7 @@ void testChainOfResponsibility()
     // Test 3: A and C bypassed
     procC->setBypassed (true);
 
-    graph.process (view);
+    graph.process_audio (buffer);
 
     assert (procA->getProcessCallCount() == 1 && "Bypassed ProcessorA should not be called");
     assert (procB->getProcessCallCount() == 3 && "ProcessorB should be called again");
@@ -594,45 +718,62 @@ struct ResourceTracker
 
 std::atomic<int> ResourceTracker::instanceCount { 0 };
 
-// ======== 7. CLEANUP AND TEARDOWN TESTS ========
+// Tracked processor for cleanup tests
+template <typename SampleType = float,
+    size_t BlockSize = 512,
+    size_t SampleRate = 44100,
+    size_t NumChannels = 2>
+class TrackedProcessor : public MockProcessor<SampleType, BlockSize, SampleRate, NumChannels>
+{
+private:
+    std::shared_ptr<ResourceTracker> tracker = std::make_shared<ResourceTracker>();
+};
+
+using TrackedProcessorF32 = TrackedProcessor<float, 512, 44100, 2>;
+
+// ======== 9. CLEANUP AND TEARDOWN TESTS ========
 
 void testCleanupAndTeardown()
 {
     std::cout << "Testing cleanup and teardown..." << std::endl;
 
-    class TrackedProcessor : public MockProcessor
-    {
-    private:
-        std::shared_ptr<ResourceTracker> tracker = std::make_shared<ResourceTracker>();
-    };
-
     // Test graph scope and cleanup
     {
-        AudioProcessorGraph graph;
+        AudioProcessorGraphF32 graph;
 
         // Add processors that use resources
         for (int i = 0; i < 10; i++)
         {
-            graph.addProcessor<TrackedProcessor>();
+            graph.addProcessor<TrackedProcessorF32>();
         }
 
         // Force some nodes to be connected
-        auto node1 = graph.addProcessor<TrackedProcessor>();
-        auto node2 = graph.addProcessor<TrackedProcessor>();
+        auto node1 = graph.addProcessor<TrackedProcessorF32>();
+        auto node2 = graph.addProcessor<TrackedProcessorF32>();
         graph.connect (node1, node2);
         graph.connect (node2, graph.getOutputNode()->getId());
 
         assert (ResourceTracker::instanceCount == 12 && "Should have 12 resource trackers");
 
         // Process some audio
-        const int numChannels = 2;
-        const int numFrames = 256;
-        AudioBuffer buffer (numChannels, numFrames);
-        BufferView view;
-        view.setData (buffer.getArrayOfChannels(), numChannels, numFrames);
+        constexpr size_t numChannels = 2;
+        constexpr size_t numFrames = 512;
+        std::array<std::array<float, numFrames>, numChannels> bufferData;
 
-        graph.prepare (44100.0, numFrames);
-        graph.process (view);
+        AudioProcessorGraphF32::AudioBuffer buffer {
+            std::span<float, numFrames> (bufferData[0]),
+            std::span<float, numFrames> (bufferData[1])
+        };
+        for (size_t ch = 0; ch < numChannels; ++ch)
+        {
+            for (size_t i = 0; i < numFrames; ++i)
+            {
+                buffer[ch][i] = 1.0f;
+            }
+        }
+
+        graph.prepare();
+        graph.process_audio (buffer);
 
         // Clear the graph explicitly
         graph.clear();
@@ -643,8 +784,8 @@ void testCleanupAndTeardown()
         assert (ResourceTracker::instanceCount == 0 && "All resources should be freed after clear()");
 
         // Add more nodes after clearing
-        graph.addProcessor<TrackedProcessor>();
-        graph.addProcessor<TrackedProcessor>();
+        graph.addProcessor<TrackedProcessorF32>();
+        graph.addProcessor<TrackedProcessorF32>();
 
         assert (ResourceTracker::instanceCount == 2 && "Should have 2 new resource trackers");
     }

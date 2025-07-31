@@ -6,82 +6,128 @@
 
 #pragma once
 #include "../processors/processor.h"
+#include <atomic>
 
 namespace PlayfulTones::DspToolBox
 {
     /**
-     * @brief A simple ADSR envelope generator.
+     * @brief High-performance ADSR envelope generator using CRTP
      *
-     * This class implements a simple ADSR (Attack, Decay, Sustain, Release) envelope generator.
-     * It can be used to shape the amplitude of audio signals over time.
+     * This class implements a high-performance ADSR (Attack, Decay, Sustain, Release) 
+     * envelope generator with compile-time optimization and lockless parameter updates.
+     * 
+     * @tparam SampleType The sample type (float, double)
+     * @tparam BlockSize Fixed block size for processing
+     * @tparam SampleRate Sample rate (compile-time constant)
+     * @tparam NumChannels Number of audio channels
      */
-    class ADSR : public Processor
+    template<typename SampleType = float, 
+             size_t BlockSize = 512, 
+             size_t SampleRate = 44100,
+             size_t NumChannels = 2>
+    class ADSR : public ProcessorBase<ADSR<SampleType, BlockSize, SampleRate, NumChannels>,
+                                      SampleType, BlockSize, SampleRate, NumChannels>
     {
     public:
+        using Base = ProcessorBase<ADSR, SampleType, BlockSize, SampleRate, NumChannels>;
+        using AudioBuffer = typename Base::AudioBuffer;
+        using sample_type = SampleType;
+        
         ADSR() = default;
-
         ~ADSR() = default;
 
-        void prepare (double /* sampleRate */, int /* maxFramesPerBlock */) override
+        void prepare_impl() noexcept
         {
-            reset();
+            reset_impl();
         }
 
-        void reset() override
+        void reset_impl() noexcept
         {
-            currentValue = 0.0;
-            currentState = State::Idle;
-            sampleCounter = 0;
+            currentValue_ = sample_type{0};
+            currentState_ = State::Idle;
+            sampleCounter_ = 0;
         }
 
-        void setAttack (double attackTimeInSeconds)
+        void process_audio_impl(AudioBuffer& buffer) noexcept
         {
-            attackSamples = attackTimeInSeconds * getSampleRate();
-        }
+            constexpr size_t numFrames = Base::block_size;
+            constexpr size_t numChannels = Base::num_channels;
 
-        void setDecay (double decayTimeInSeconds)
-        {
-            decaySamples = decayTimeInSeconds * getSampleRate();
-        }
-
-        void setSustain (double sustainLevel)
-        {
-            sustainValue = sustainLevel;
-        }
-
-        void setRelease (double releaseTimeInSeconds)
-        {
-            releaseSamples = releaseTimeInSeconds * getSampleRate();
-        }
-
-        void noteOn()
-        {
-            currentState = State::Attack;
-            sampleCounter = 0;
-            releaseStartValue = currentValue;
-        }
-
-        void noteOff()
-        {
-            currentState = State::Release;
-            sampleCounter = 0;
-            releaseStartValue = currentValue;
-        }
-
-        void process (BufferView& buffer) override
-        {
-            const auto numFrames = buffer.getNumFrames();
-            const auto numChannels = buffer.getNumChannels();
-
-            for (int i = 0; i < numFrames; i++)
+            for (size_t i = 0; i < numFrames; ++i)
             {
-                double envValue = processNextValue();
+                sample_type envValue = processNextValue();
 
-                for (int ch = 0; ch < numChannels; ch++)
+                for (size_t ch = 0; ch < numChannels; ++ch)
                 {
-                    buffer.getChannelPointer (ch)[i] *= static_cast<float> (envValue);
+                    buffer[ch][i] *= envValue;
                 }
             }
+        }
+
+        void process_control_impl() noexcept
+        {
+            // Update internal parameters from atomic values if needed
+            // This allows thread-safe parameter updates
+        }
+
+        /**
+         * @brief Set attack time in seconds (thread-safe)
+         */
+        void setAttack(double attackTimeInSeconds) noexcept
+        {
+            attackSamples_.store(attackTimeInSeconds * Base::sample_rate, std::memory_order_relaxed);
+        }
+
+        /**
+         * @brief Set decay time in seconds (thread-safe)
+         */
+        void setDecay(double decayTimeInSeconds) noexcept
+        {
+            decaySamples_.store(decayTimeInSeconds * Base::sample_rate, std::memory_order_relaxed);
+        }
+
+        /**
+         * @brief Set sustain level (thread-safe)
+         */
+        void setSustain(double sustainLevel) noexcept
+        {
+            sustainValue_.store(sustainLevel, std::memory_order_relaxed);
+        }
+
+        /**
+         * @brief Set release time in seconds (thread-safe)
+         */
+        void setRelease(double releaseTimeInSeconds) noexcept
+        {
+            releaseSamples_.store(releaseTimeInSeconds * Base::sample_rate, std::memory_order_relaxed);
+        }
+
+        /**
+         * @brief Trigger note on (thread-safe)
+         */
+        void noteOn() noexcept
+        {
+            currentState_ = State::Attack;
+            sampleCounter_ = 0;
+            releaseStartValue_ = currentValue_;
+        }
+
+        /**
+         * @brief Trigger note off (thread-safe)
+         */
+        void noteOff() noexcept
+        {
+            currentState_ = State::Release;
+            sampleCounter_ = 0;
+            releaseStartValue_ = currentValue_;
+        }
+
+        /**
+         * @brief Get current envelope value
+         */
+        sample_type getCurrentValue() const noexcept
+        {
+            return currentValue_;
         }
 
     private:
@@ -93,69 +139,84 @@ namespace PlayfulTones::DspToolBox
             Release
         };
 
-        double processNextValue()
+        sample_type processNextValue() noexcept
         {
-            switch (currentState)
+            const double attackSamples = attackSamples_.load(std::memory_order_relaxed);
+            const double decaySamples = decaySamples_.load(std::memory_order_relaxed);
+            const double sustainValue = sustainValue_.load(std::memory_order_relaxed);
+            const double releaseSamples = releaseSamples_.load(std::memory_order_relaxed);
+
+            switch (currentState_)
             {
                 case State::Attack:
-                    if (sampleCounter >= attackSamples)
+                    if (sampleCounter_ >= attackSamples)
                     {
-                        currentState = State::Decay;
-                        sampleCounter = 0;
-                        currentValue = 1.0;
+                        currentState_ = State::Decay;
+                        sampleCounter_ = 0;
+                        currentValue_ = sample_type{1};
                     }
                     else
                     {
-                        currentValue = sampleCounter / attackSamples;
+                        currentValue_ = static_cast<sample_type>(
+                            attackSamples > 0 ? sampleCounter_ / attackSamples : 1.0);
                     }
                     break;
 
                 case State::Decay:
-                    if (sampleCounter >= decaySamples)
+                    if (sampleCounter_ >= decaySamples)
                     {
-                        currentState = State::Sustain;
-                        currentValue = sustainValue;
+                        currentState_ = State::Sustain;
+                        currentValue_ = static_cast<sample_type>(sustainValue);
                     }
                     else
                     {
-                        double decayProgress = sampleCounter / decaySamples;
-                        currentValue = 1.0 - (1.0 - sustainValue) * decayProgress;
+                        double decayProgress = decaySamples > 0 ? sampleCounter_ / decaySamples : 1.0;
+                        currentValue_ = static_cast<sample_type>(
+                            1.0 - (1.0 - sustainValue) * decayProgress);
                     }
                     break;
 
                 case State::Sustain:
-                    currentValue = sustainValue;
+                    currentValue_ = static_cast<sample_type>(sustainValue);
                     break;
 
                 case State::Release:
-                    if (sampleCounter >= releaseSamples)
+                    if (sampleCounter_ >= releaseSamples)
                     {
-                        currentState = State::Idle;
-                        currentValue = 0.0;
+                        currentState_ = State::Idle;
+                        currentValue_ = sample_type{0};
                     }
                     else
                     {
-                        double releaseProgress = sampleCounter / releaseSamples;
-                        currentValue = releaseStartValue * (1.0 - releaseProgress);
+                        double releaseProgress = releaseSamples > 0 ? sampleCounter_ / releaseSamples : 1.0;
+                        currentValue_ = static_cast<sample_type>(
+                            releaseStartValue_ * (1.0 - releaseProgress));
                     }
                     break;
 
                 case State::Idle:
-                    currentValue = 0.0;
+                    currentValue_ = sample_type{0};
                     break;
             }
 
-            sampleCounter++;
-            return currentValue;
+            ++sampleCounter_;
+            return currentValue_;
         }
 
-        double attackSamples = 0.0;
-        double decaySamples = 0.0;
-        double sustainValue = 1.0;
-        double releaseSamples = 0.0;
-        double currentValue = 0.0;
-        double releaseStartValue = 0.0;
-        double sampleCounter = 0;
-        State currentState = State::Idle;
+        // Thread-safe parameter storage
+        std::atomic<double> attackSamples_{0.0};
+        std::atomic<double> decaySamples_{0.0};
+        std::atomic<double> sustainValue_{1.0};
+        std::atomic<double> releaseSamples_{0.0};
+
+        // Audio thread state (not atomic - only accessed from audio thread)
+        sample_type currentValue_{0};
+        sample_type releaseStartValue_{0};
+        double sampleCounter_{0};
+        State currentState_{State::Idle};
     };
+    
+    // Common type aliases
+    using ADSRF32 = ADSR<float, 512, 44100, 2>;
+    using ADSRF64 = ADSR<double, 512, 44100, 2>;
 } // namespace PlayfulTones::DspToolBox

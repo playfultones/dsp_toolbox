@@ -18,44 +18,47 @@
 namespace PlayfulTones::DspToolBox
 {
     /**
-     * @brief Builds and manages an audio processing graph
+     * @brief High-performance template-based graph builder
      * 
      * This class handles the creation and connection of nodes in the audio graph,
-     * as well as topological sorting to create a proper processing sequence.
+     * with compile-time optimization for maximum performance.
+     * 
+     * @tparam SampleType The sample type (float, double)
+     * @tparam BlockSize Fixed block size for processing
+     * @tparam SampleRate Sample rate
+     * @tparam NumChannels Number of audio channels
      */
+    template<typename SampleType = float, 
+             size_t BlockSize = 512, 
+             size_t SampleRate = 44100,
+             size_t NumChannels = 2>
     class GraphBuilder
     {
     public:
+        using NodeType = AudioGraphNode<SampleType, BlockSize, SampleRate, NumChannels>;
+        using NodePtr = typename NodeType::Ptr;
+        using NodeId = typename NodeType::Id;
+        
         GraphBuilder()
         {
             createOutputNode();
         }
 
         /**
-         * @brief Adds a node to the graph
-         * @param processor The processor to wrap in a node
-         * @return Shared pointer to the created node
-         */
-        AudioGraphNode::Ptr addNode (std::unique_ptr<Processor> processor)
-        {
-            auto node = std::make_shared<AudioGraphNode> (std::move (processor));
-            AudioGraphNode::Id id = node->getId();
-            nodes[id] = node;
-            return node;
-        }
-
-        /**
-         * @brief Template version of addNode that constructs the processor in-place
-         * @tparam T The processor type
+         * @brief Adds a processor node to the graph using CRTP processor
+         * @tparam ProcessorType The CRTP processor type
          * @tparam Args Constructor argument types
          * @param args Constructor arguments for the processor
          * @return Shared pointer to the created node
          */
-        template <typename T, typename... Args>
-        AudioGraphNode::Ptr addNode (Args&&... args)
+        template<Processor ProcessorType, typename... Args>
+        NodePtr addNode(Args&&... args)
         {
-            auto processor = std::make_unique<T> (std::forward<Args> (args)...);
-            return addNode (std::move (processor));
+            auto wrapper = std::make_unique<ProcessorWrapper<ProcessorType>>(std::forward<Args>(args)...);
+            auto node = std::make_shared<NodeType>(std::move(wrapper));
+            NodeId id = node->getId();
+            nodes_[id] = node;
+            return node;
         }
 
         /**
@@ -63,9 +66,9 @@ namespace PlayfulTones::DspToolBox
          * @param id The ID of the node to remove
          * @return True if the node was found and removed
          */
-        bool removeNode (AudioGraphNode::Id id)
+        bool removeNode(NodeId id)
         {
-            return nodes.erase (id) > 0;
+            return nodes_.erase(id) > 0;
         }
 
         /**
@@ -76,15 +79,15 @@ namespace PlayfulTones::DspToolBox
          * @param inputChannel The input channel on the target node
          * @return True if the connection was successful
          */
-        bool connect (AudioGraphNode::Id sourceId, AudioGraphNode::Id targetId, int outputChannel = 0, int inputChannel = 0)
+        bool connect(NodeId sourceId, NodeId targetId, int outputChannel = 0, int inputChannel = 0)
         {
-            auto sourceIt = nodes.find (sourceId);
-            auto targetIt = nodes.find (targetId);
+            auto sourceIt = nodes_.find(sourceId);
+            auto targetIt = nodes_.find(targetId);
 
-            if (sourceIt == nodes.end() || targetIt == nodes.end())
+            if (sourceIt == nodes_.end() || targetIt == nodes_.end())
                 return false;
 
-            return targetIt->second->addInputConnection (sourceIt->second, outputChannel, inputChannel);
+            return targetIt->second->addInputConnection(sourceIt->second, outputChannel, inputChannel);
         }
 
         /**
@@ -95,15 +98,15 @@ namespace PlayfulTones::DspToolBox
          * @param inputChannel The input channel on the target node
          * @return True if the disconnection was successful
          */
-        bool disconnect (AudioGraphNode::Id sourceId, AudioGraphNode::Id targetId, int outputChannel = 0, int inputChannel = 0)
+        bool disconnect(NodeId sourceId, NodeId targetId, int outputChannel = 0, int inputChannel = 0)
         {
-            auto sourceIt = nodes.find (sourceId);
-            auto targetIt = nodes.find (targetId);
+            auto sourceIt = nodes_.find(sourceId);
+            auto targetIt = nodes_.find(targetId);
 
-            if (sourceIt == nodes.end() || targetIt == nodes.end())
+            if (sourceIt == nodes_.end() || targetIt == nodes_.end())
                 return false;
 
-            return targetIt->second->removeInputConnection (sourceIt->second, outputChannel, inputChannel);
+            return targetIt->second->removeInputConnection(sourceIt->second, outputChannel, inputChannel);
         }
 
         /**
@@ -111,42 +114,51 @@ namespace PlayfulTones::DspToolBox
          * @param id The ID of the node to get
          * @return Shared pointer to the node, or nullptr if not found
          */
-        AudioGraphNode::Ptr getNode (AudioGraphNode::Id id)
+        NodePtr getNode(NodeId id)
         {
-            auto it = nodes.find (id);
-            return (it != nodes.end()) ? it->second : nullptr;
+            auto it = nodes_.find(id);
+            return (it != nodes_.end()) ? it->second : nullptr;
         }
 
         /**
          * @brief Gets the output node of the graph
          * @return Shared pointer to the output node
          */
-        AudioGraphNode::Ptr getOutputNode() const
+        NodePtr getOutputNode() const
         {
-            return outputNode;
+            return outputNode_;
         }
 
         /**
          * @brief Prepares all nodes in the graph for processing
-         * @param sampleRate The sample rate
-         * @param maxFramesPerBlock The maximum number of frames per block
          */
-        void prepareAll (double sampleRate, int maxFramesPerBlock)
+        void prepareAll() noexcept
         {
-            for (auto& [id, node] : nodes)
+            for (auto& [id, node] : nodes_)
             {
-                node->prepare (sampleRate, maxFramesPerBlock);
+                node->prepare();
             }
         }
 
         /**
          * @brief Resets all nodes in the graph
          */
-        void resetAll()
+        void resetAll() noexcept
         {
-            for (auto& [id, node] : nodes)
+            for (auto& [id, node] : nodes_)
             {
                 node->reset();
+            }
+        }
+
+        /**
+         * @brief Process control updates for all nodes (cold path)
+         */
+        void processControlAll() noexcept
+        {
+            for (auto& [id, node] : nodes_)
+            {
+                node->processControl();
             }
         }
 
@@ -155,9 +167,7 @@ namespace PlayfulTones::DspToolBox
          */
         void clear()
         {
-            nodes.clear();
-
-            // Recreate the output node
+            nodes_.clear();
             createOutputNode();
         }
 
@@ -165,19 +175,18 @@ namespace PlayfulTones::DspToolBox
          * @brief Performs topological sorting of the node graph
          * @return Vector of nodes in processing order
          */
-        std::vector<AudioGraphNode::Ptr> createRenderSequence() const
+        std::vector<NodePtr> createRenderSequence() const
         {
-            std::vector<AudioGraphNode::Ptr> sequence;
-            std::unordered_map<AudioGraphNode::Id, bool> visited;
-            std::unordered_map<AudioGraphNode::Id, bool> inStack; // For cycle detection
+            std::vector<NodePtr> sequence;
+            std::unordered_map<NodeId, bool> visited;
+            std::unordered_map<NodeId, bool> inStack; // For cycle detection
 
             // DFS-based topological sort
-            std::function<bool (AudioGraphNode::Ptr)> dfs =
-                [&] (AudioGraphNode::Ptr node) -> bool {
+            std::function<bool(NodePtr)> dfs = [&](NodePtr node) -> bool {
                 if (!node)
                     return true;
 
-                AudioGraphNode::Id nodeId = node->getId();
+                NodeId nodeId = node->getId();
 
                 // Check for cycles
                 if (inStack[nodeId])
@@ -196,14 +205,14 @@ namespace PlayfulTones::DspToolBox
                     {
                         if (auto sourceNode = connection.node.lock())
                         {
-                            if (!dfs (sourceNode))
+                            if (!dfs(sourceNode))
                                 return false; // Propagate cycle detection
                         }
                     }
                 }
 
                 // Add to sequence after dependencies
-                sequence.push_back (node);
+                sequence.push_back(node);
                 visited[nodeId] = true;
                 inStack[nodeId] = false;
 
@@ -214,27 +223,34 @@ namespace PlayfulTones::DspToolBox
             auto output = getOutputNode();
             if (output)
             {
-                if (!dfs (output))
+                if (!dfs(output))
                 {
                     // Handle cycle detection - clear sequence and return empty
                     sequence.clear();
                 }
             }
 
-            // The sequence is already in the correct order for determining the output node
-            // (output node at the end), but we don't need to reverse it since we use
-            // the recursive processing approach
             return sequence;
         }
+
+        /**
+         * @brief Get compile-time configuration
+         */
+        static constexpr size_t getBlockSize() { return BlockSize; }
+        static constexpr size_t getSampleRate() { return SampleRate; }
+        static constexpr size_t getNumChannels() { return NumChannels; }
 
     private:
         void createOutputNode()
         {
-            auto outputProcessor = std::make_unique<OutputProcessor>();
-            outputNode = addNode (std::move (outputProcessor));
+            outputNode_ = addNode<OutputProcessor<SampleType, BlockSize, SampleRate, NumChannels>>();
         }
 
-        std::unordered_map<AudioGraphNode::Id, AudioGraphNode::Ptr> nodes;
-        AudioGraphNode::Ptr outputNode;
+        std::unordered_map<NodeId, NodePtr> nodes_;
+        NodePtr outputNode_;
     };
+    
+    // Common type aliases
+    using GraphBuilderF32 = GraphBuilder<float, 512, 44100, 2>;
+    using GraphBuilderF64 = GraphBuilder<double, 512, 44100, 2>;
 }

@@ -5,76 +5,206 @@
 *******************************************************************/
 
 #pragma once
-#include "../core/buffer_view.h"
+#include <span>
+#include <array>
+#include <concepts>
+#include <type_traits>
 
 namespace PlayfulTones::DspToolBox
 {
     /**
-     * @brief Abstract base class for all DSP processors.
-     *
-     * This class defines the interface that all DSP processors must implement,
-     * providing the standard methods for preparation, processing and reset.
+     * @brief High-performance CRTP-based processor base class
+     * 
+     * This class uses CRTP (Curiously Recurring Template Pattern) to avoid virtual function
+     * overhead in hot audio processing paths. All configuration is done at compile-time
+     * for maximum cache efficiency.
+     * 
+     * @tparam Derived The derived processor class
+     * @tparam SampleType The sample type (float, double)
+     * @tparam BlockSize Fixed block size for processing (compile-time constant)
+     * @tparam SampleRate Sample rate (compile-time constant)
+     * @tparam NumChannels Number of audio channels
      */
-    class Processor
+    template<typename Derived, 
+             typename SampleType = float, 
+             size_t BlockSize = 512, 
+             size_t SampleRate = 44100,
+             size_t NumChannels = 2>
+    class ProcessorBase
     {
     public:
-        virtual ~Processor() = default;
-
+        // Compile-time constants for cache optimization
+        static constexpr size_t block_size = BlockSize;
+        static constexpr size_t sample_rate = SampleRate;
+        static constexpr size_t num_channels = NumChannels;
+        using sample_type = SampleType;
+        
+        // Type aliases for buffer management
+        using ChannelBuffer = std::span<sample_type, block_size>;
+        using AudioBuffer = std::array<ChannelBuffer, num_channels>;
+        
         /**
-         * @brief This method is used to prepare the processor for playback.
-         * It sets the sample rate and calls the virtual prepare method to allow derived classes
-         * to implement their own preparation logic.
-         * @param sampleRate The sample rate at which the processor will operate.
-         * @param maxFramesPerBlock The maximum number of frames that will be processed at once.
+         * @brief Audio-rate processing (hot path) - no virtual functions
+         * @param buffer Multi-channel audio buffer with compile-time known dimensions
          */
-        void prepareProcessor (double sampleRate, int maxFramesPerBlock)
+        void process_audio(AudioBuffer& buffer) noexcept
         {
-            setSampleRate (sampleRate);
-            // Call the virtual prepare method to allow derived classes to implement their own preparation logic.
-            prepare (sampleRate, maxFramesPerBlock);
+            static_cast<Derived*>(this)->process_audio_impl(buffer);
+        }
+        
+        /**
+         * @brief Control-rate processing (cold path) for parameter updates
+         * Called less frequently than audio processing
+         */
+        void process_control() noexcept
+        {
+            static_cast<Derived*>(this)->process_control_impl();
+        }
+        
+        /**
+         * @brief Prepare the processor - called once before processing starts
+         */
+        void prepare() noexcept
+        {
+            static_cast<Derived*>(this)->prepare_impl();
+        }
+        
+        /**
+         * @brief Reset processor state
+         */
+        void reset() noexcept
+        {
+            static_cast<Derived*>(this)->reset_impl();
+        }
+        
+        /**
+         * @brief Get compile-time sample rate
+         */
+        static constexpr size_t get_sample_rate() noexcept
+        {
+            return sample_rate;
+        }
+        
+        /**
+         * @brief Get compile-time block size
+         */
+        static constexpr size_t get_block_size() noexcept
+        {
+            return block_size;
+        }
+        
+        /**
+         * @brief Get compile-time channel count
+         */
+        static constexpr size_t get_num_channels() noexcept
+        {
+            return num_channels;
         }
 
-        /**
-         * @brief Prepare the processor for playback.
-         * @param sampleRate The sample rate at which the processor will operate.
-         * @param maxFramesPerBlock The maximum number of frames that will be processed at once.
-         */
-        virtual void prepare (double sampleRate, int maxFramesPerBlock) = 0;
-
-        /**
-         * @brief Process audio data using BufferView.
-         * @param buffer The buffer view containing the audio data to process.
-         */
-        virtual void process (BufferView& buffer) = 0;
-
-        /**
-         * @brief Reset the processor's internal state.
-         */
-        virtual void reset()
+    protected:
+        // Default implementations that derived classes can override
+        void process_audio_impl(AudioBuffer& /* buffer */) noexcept
         {
-            // Default implementation does nothing.
-            // Derived classes can override this method to reset their internal state.
+            // Default: pass through
         }
-
-        /**
-         * @brief Get the sample rate of the processor.
-         * @return The sample rate at which the processor is operating.
-         */
-        double getSampleRate() const
+        
+        void process_control_impl() noexcept
         {
-            return sr;
+            // Default: no control processing
         }
-
-        /**
-         * @brief Set the sample rate of the processor.
-         * @param sampleRate The new sample rate to set.
-         */
-        void setSampleRate (double sampleRate)
+        
+        void prepare_impl() noexcept
         {
-            sr = sampleRate;
+            // Default: no preparation needed
         }
-
+        
+        void reset_impl() noexcept
+        {
+            // Default: no reset needed
+        }
+    };
+    
+    /**
+     * @brief Concept to check if a type is a valid processor
+     */
+    template<typename T>
+    concept Processor = requires(T processor) {
+        typename T::sample_type;
+        { T::block_size } -> std::convertible_to<size_t>;
+        { T::sample_rate } -> std::convertible_to<size_t>;
+        { T::num_channels } -> std::convertible_to<size_t>;
+        { processor.process_audio(std::declval<typename T::AudioBuffer&>()) } -> std::same_as<void>;
+        { processor.process_control() } -> std::same_as<void>;
+        { processor.prepare() } -> std::same_as<void>;
+        { processor.reset() } -> std::same_as<void>;
+    };
+    
+    /**
+     * @brief Type-erased processor interface for graph nodes
+     */
+    class ProcessorInterface
+    {
+    public:
+        virtual ~ProcessorInterface() = default;
+        virtual void process_audio_erased(void* buffer) = 0;
+        virtual void process_control() = 0;
+        virtual void prepare() = 0;
+        virtual void reset() = 0;
+        virtual size_t get_block_size() const = 0;
+        virtual size_t get_sample_rate() const = 0;
+        virtual size_t get_num_channels() const = 0;
+    };
+    
+    /**
+     * @brief Wrapper to type-erase processors for use in heterogeneous graphs
+     */
+    template<Processor P>
+    class ProcessorWrapper : public ProcessorInterface
+    {
+    public:
+        template<typename... Args>
+        ProcessorWrapper(Args&&... args) : processor_(std::forward<Args>(args)...) {}
+        
+        void process_audio_erased(void* buffer) override
+        {
+            auto* typed_buffer = static_cast<typename P::AudioBuffer*>(buffer);
+            processor_.process_audio(*typed_buffer);
+        }
+        
+        void process_control() override
+        {
+            processor_.process_control();
+        }
+        
+        void prepare() override
+        {
+            processor_.prepare();
+        }
+        
+        void reset() override
+        {
+            processor_.reset();
+        }
+        
+        size_t get_block_size() const override
+        {
+            return P::block_size;
+        }
+        
+        size_t get_sample_rate() const override
+        {
+            return P::sample_rate;
+        }
+        
+        size_t get_num_channels() const override
+        {
+            return P::num_channels;
+        }
+        
+        P& processor() { return processor_; }
+        const P& processor() const { return processor_; }
+        
     private:
-        double sr = 44100.0; // Default sample rate
+        P processor_;
     };
 } // namespace PlayfulTones::DspToolBox
