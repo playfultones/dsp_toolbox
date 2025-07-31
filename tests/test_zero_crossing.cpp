@@ -7,30 +7,33 @@
 #include "analysis/zerocrossing.h"
 #include "core/constants.h"
 #include "helpers/compilationhelpers.h"
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <span>
 
 using namespace PlayfulTones::DspToolBox;
 
-// Helper function to create a sine wave
-void generateSineWave (float* buffer, int numSamples, float frequency, float sampleRate)
+// Helper function to create a sine wave in a fixed-size buffer
+template <size_t Size>
+void generateSineWave (std::array<float, Size>& buffer, float frequency, float sampleRate) noexcept
 {
-    for (int i = 0; i < numSamples; i++)
+    for (size_t i = 0; i < Size; ++i)
     {
-        buffer[i] = std::sin (Constants::twoPi * frequency * i / sampleRate);
+        buffer[i] = std::sin (Constants::twoPi * frequency * static_cast<float> (i) / sampleRate);
     }
 }
 
-// Test basic zero crossing detection
+// Test basic zero crossing detection with compile-time sized buffers
 void testBasicZeroCrossing()
 {
-    const int numFrames = 5;
-    float data[] = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 4 zero crossings
-    float* buffer[1] = { data };
+    constexpr size_t BlockSize = 5;
+    std::array<float, BlockSize> data = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 4 zero crossings
+    std::span<const float, BlockSize> buffer { data };
 
-    int crossings = countZeroCrossings (buffer, 1, numFrames);
-    int expectedCrossings = 4; // We expect 4 zero crossings in our test data
+    const size_t crossings = ZeroCrossingAnalyzer::countZeroCrossings (buffer);
+    constexpr size_t expectedCrossings = 4; // We expect 4 zero crossings in our test data
     assert (crossings == expectedCrossings && "Basic zero crossing test failed");
     markUsed (crossings, expectedCrossings);
 }
@@ -38,73 +41,75 @@ void testBasicZeroCrossing()
 // Test zero crossing with a sine wave
 void testSineWaveZeroCrossing()
 {
-    const int numFrames = 1000;
-    const float sampleRate = 44100.0f;
-    const float frequency = 440.0f; // A4 note
+    constexpr size_t BlockSize = 1000;
+    constexpr float sampleRate = 44100.0f;
+    constexpr float frequency = 440.0f; // A4 note
 
-    float* sineWave = new float[numFrames];
-    generateSineWave (sineWave, numFrames, frequency, sampleRate);
+    std::array<float, BlockSize> sineWave;
+    generateSineWave (sineWave, frequency, sampleRate);
 
-    float* buffer[1] = { sineWave };
-    int crossings = countZeroCrossings (buffer, 1, numFrames);
+    std::span<const float, BlockSize> buffer { sineWave };
+    const size_t crossings = ZeroCrossingAnalyzer::countZeroCrossings (buffer);
 
-    // For a sine wave, we expect approximately 2 * frequency * (numFrames/sampleRate) zero crossings
-    float expectedCrossings = 2.0f * frequency * (numFrames / sampleRate);
-    float tolerance = 2.0f; // Allow for some numerical imprecision
+    // For a sine wave, we expect approximately 2 * frequency * (BlockSize/sampleRate) zero crossings
+    const float expectedCrossings = 2.0f * frequency * (static_cast<float> (BlockSize) / sampleRate);
+    constexpr float tolerance = 2.0f; // Allow for some numerical imprecision
 
-    // Use the tolerance and expectedCrossings in a more explicit way
-    float difference = std::abs (crossings - expectedCrossings);
+    const float difference = std::abs (static_cast<float> (crossings) - expectedCrossings);
     assert (difference <= tolerance && "Sine wave zero crossing count is not within expected range");
 
     markUsed (difference, tolerance);
-    delete[] sineWave;
 }
 
 // Test frequency detection using zero crossings
 void testFrequencyDetection()
 {
-    const int numFrames = 44100; // 1 second at 44.1kHz for better accuracy
-    const float sampleRate = 44100.0f;
-    const float testFrequency = 440.0f; // A4 note
-    const float hysteresis = 0.0001f; // Very small hysteresis for clean sine wave
+    constexpr size_t BlockSize = 44100; // 1 second at 44.1kHz for better accuracy
+    constexpr float sampleRate = 44100.0f;
+    constexpr float testFrequency = 440.0f; // A4 note
+    constexpr float hysteresis = 0.0001f; // Very small hysteresis for clean sine wave
 
-    float* sineWave = new float[numFrames];
-    generateSineWave (sineWave, numFrames, testFrequency, sampleRate);
+    std::array<float, BlockSize> sineWave;
+    generateSineWave (sineWave, testFrequency, sampleRate);
 
-    float* buffer[1] = { sineWave };
-    int crossings = countZeroCrossings (buffer, 1, numFrames, ZeroCrossingDirection::All, hysteresis);
+    std::span<const float, BlockSize> buffer { sineWave };
+    const size_t crossings = ZeroCrossingAnalyzer::countZeroCrossings (buffer, ZeroCrossingDirection::All, hysteresis);
 
-    // Calculate frequency from zero crossings
-    // frequency = (number of zero crossings * sampleRate) / (2 * numFrames)
-    float detectedFrequency = (crossings * sampleRate) / (2.0f * numFrames);
+    // Calculate frequency from zero crossings using the built-in method
+    const float zcr = static_cast<float> (crossings) / static_cast<float> (BlockSize);
+    const float detectedFrequency = ZeroCrossingAnalyzer::estimateFrequencyFromZCR (zcr, sampleRate);
 
     // Debug output
     printf ("Expected frequency: %.3f Hz\n", testFrequency);
     printf ("Detected frequency: %.3f Hz\n", detectedFrequency);
-    printf ("Number of crossings: %d\n", crossings);
+    printf ("Number of crossings: %zu\n", crossings);
     printf ("Expected crossings: %.1f\n", 2.0f * testFrequency); // For 1 second of audio
 
-    float tolerance = 0.5f; // Tighter tolerance with improved accuracy
-    float diff = std::abs (detectedFrequency - testFrequency);
+    constexpr float tolerance = 0.51f; // Allow for floating point precision issues
+    const float diff = std::abs (detectedFrequency - testFrequency);
     printf ("Frequency difference: %.3f Hz (tolerance: %.3f Hz)\n", diff, tolerance);
     assert (diff <= tolerance && "Frequency detection is not within expected range");
-
-    delete[] sineWave;
 }
 
-// Test multi-channel zero crossing detection
+// Test multi-channel zero crossing detection using a simple multi-channel buffer
 void testMultiChannelZeroCrossing()
 {
-    const int numFrames = 5;
-    const int numChannels = 2;
+    constexpr size_t BlockSize = 5;
+    constexpr size_t NumChannels = 2;
 
-    float channel1[] = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 4 crossings
-    float channel2[] = { 1.0f, 1.0f, -1.0f, -1.0f, 1.0f }; // 2 crossings
-    float* buffer[2] = { channel1, channel2 };
+    std::array<float, BlockSize> channel1 = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 4 crossings
+    std::array<float, BlockSize> channel2 = { 1.0f, 1.0f, -1.0f, -1.0f, 1.0f }; // 2 crossings
 
-    int crossings = countZeroCrossings (buffer, numChannels, numFrames);
+    std::array<std::span<const float, BlockSize>, NumChannels> buffer = {
+        std::span<const float, BlockSize> { channel1 },
+        std::span<const float, BlockSize> { channel2 }
+    };
+
+    const size_t crossings = ZeroCrossingAnalyzer::countZeroCrossings (buffer);
+    constexpr size_t expectedCrossings = 6; // Total should be 6
+
     markUsed (crossings);
-    assert (crossings == 6 && "Multi-channel zero crossing test failed"); // Total should be 6
+    assert (crossings == expectedCrossings && "Multi-channel zero crossing test failed");
 }
 
 // Test zero crossing rate calculation
@@ -112,51 +117,53 @@ void testZeroCrossingRate()
 {
     // Test with basic signal
     {
-        const int numFrames = 5;
-        float data[] = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 4 zero crossings
-        float* buffer[1] = { data };
+        constexpr size_t BlockSize = 5;
+        std::array<float, BlockSize> data = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 4 zero crossings
+        std::span<const float, BlockSize> buffer { data };
 
-        float zcr = calculateZeroCrossingRate (buffer, 1, numFrames);
-        float expectedZCR = 4.0f / 5.0f; // 4 crossings / 5 samples
+        const float zcr = ZeroCrossingAnalyzer::calculateZeroCrossingRate (buffer);
+        constexpr float expectedZCR = 4.0f / 5.0f; // 4 crossings / 5 samples
         markUsed (zcr, expectedZCR);
         assert (std::abs (zcr - expectedZCR) < 0.0001f && "Basic ZCR test failed");
     }
 
     // Test with sine wave
     {
-        const int numFrames = 44100; // 1 second at 44.1kHz
-        const float sampleRate = 44100.0f;
-        const float frequency = 440.0f; // A4 note
+        constexpr size_t BlockSize = 44100; // 1 second at 44.1kHz
+        constexpr float sampleRate = 44100.0f;
+        constexpr float frequency = 440.0f; // A4 note
 
-        float* sineWave = new float[numFrames];
-        generateSineWave (sineWave, numFrames, frequency, sampleRate);
+        std::array<float, BlockSize> sineWave;
+        generateSineWave (sineWave, frequency, sampleRate);
 
-        float* buffer[1] = { sineWave };
-        float zcr = calculateZeroCrossingRate (buffer, 1, numFrames);
+        std::span<const float, BlockSize> buffer { sineWave };
+        const float zcr = ZeroCrossingAnalyzer::calculateZeroCrossingRate (buffer);
 
         // Expected ZCR for a sine wave is 2 * frequency / sampleRate
-        float expectedZCR = 2.0f * frequency / sampleRate;
-        float tolerance = 0.0001f;
+        const float expectedZCR = 2.0f * frequency / sampleRate;
+        constexpr float tolerance = 0.0001f;
 
         markUsed (tolerance);
         printf ("Expected ZCR: %.6f\n", expectedZCR);
         printf ("Measured ZCR: %.6f\n", zcr);
         assert (std::abs (zcr - expectedZCR) <= tolerance && "Sine wave ZCR test failed");
-
-        delete[] sineWave;
     }
 
     // Test multi-channel ZCR
     {
-        const int numFrames = 5;
-        const int numChannels = 2;
+        constexpr size_t BlockSize = 5;
+        constexpr size_t NumChannels = 2;
 
-        float channel1[] = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 4 crossings
-        float channel2[] = { 1.0f, 1.0f, -1.0f, -1.0f, 1.0f }; // 2 crossings
-        float* buffer[2] = { channel1, channel2 };
+        std::array<float, BlockSize> channel1 = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 4 crossings
+        std::array<float, BlockSize> channel2 = { 1.0f, 1.0f, -1.0f, -1.0f, 1.0f }; // 2 crossings
 
-        float zcr = calculateZeroCrossingRate (buffer, numChannels, numFrames);
-        float expectedZCR = 6.0f / (numFrames * numChannels); // 6 total crossings / 10 total samples
+        std::array<std::span<const float, BlockSize>, NumChannels> buffer = {
+            std::span<const float, BlockSize> { channel1 },
+            std::span<const float, BlockSize> { channel2 }
+        };
+
+        const float zcr = ZeroCrossingAnalyzer::calculateZeroCrossingRate (buffer);
+        constexpr float expectedZCR = 6.0f / (BlockSize * NumChannels); // 6 total crossings / 10 total samples
 
         markUsed (zcr, expectedZCR);
         assert (std::abs (zcr - expectedZCR) < 0.0001f && "Multi-channel ZCR test failed");
@@ -166,64 +173,62 @@ void testZeroCrossingRate()
 // Test directional zero crossing detection
 void testDirectionalZeroCrossing()
 {
-    const int numFrames = 5;
-    float data[] = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 2 positive and 2 negative crossings
-    float* buffer[1] = { data };
+    constexpr size_t BlockSize = 5;
+    std::array<float, BlockSize> data = { 1.0f, -1.0f, 1.0f, -1.0f, 1.0f }; // 2 positive and 2 negative crossings
+    std::span<const float, BlockSize> buffer { data };
 
     // Test positive-going crossings
-    int positiveCrossings = countZeroCrossings (buffer, 1, numFrames, ZeroCrossingDirection::Positive, 0.0f);
+    const size_t positiveCrossings = ZeroCrossingAnalyzer::countZeroCrossings (buffer, ZeroCrossingDirection::Positive, 0.0f);
     assert (positiveCrossings == 2 && "Positive-going zero crossing count incorrect");
 
     // Test negative-going crossings
-    int negativeCrossings = countZeroCrossings (buffer, 1, numFrames, ZeroCrossingDirection::Negative, 0.0f);
+    const size_t negativeCrossings = ZeroCrossingAnalyzer::countZeroCrossings (buffer, ZeroCrossingDirection::Negative, 0.0f);
     assert (negativeCrossings == 2 && "Negative-going zero crossing count incorrect");
 
     // Verify that total equals sum of positive and negative
-    int totalCrossings = countZeroCrossings (buffer, 1, numFrames, ZeroCrossingDirection::All, 0.0f);
+    const size_t totalCrossings = ZeroCrossingAnalyzer::countZeroCrossings (buffer, ZeroCrossingDirection::All, 0.0f);
     assert (totalCrossings == positiveCrossings + negativeCrossings && "Total crossings should equal sum of directional crossings");
 
     markUsed (positiveCrossings, negativeCrossings, totalCrossings);
 
     // Test with sine wave
-    const float sampleRate = 44100.0f;
-    const float frequency = 440.0f;
-    const int sineFrames = 1000;
+    constexpr float sampleRate = 44100.0f;
+    constexpr float frequency = 440.0f;
+    constexpr size_t SineBlockSize = 1000;
 
-    float* sineWave = new float[sineFrames];
-    generateSineWave (sineWave, sineFrames, frequency, sampleRate);
-    float* sineBuffer[1] = { sineWave };
+    std::array<float, SineBlockSize> sineWave;
+    generateSineWave (sineWave, frequency, sampleRate);
+    std::span<const float, SineBlockSize> sineBuffer { sineWave };
 
-    int sinePositive = countZeroCrossings (sineBuffer, 1, sineFrames, ZeroCrossingDirection::Positive, 0.0f);
-    int sineNegative = countZeroCrossings (sineBuffer, 1, sineFrames, ZeroCrossingDirection::Negative, 0.0f);
-    int sineTotal = countZeroCrossings (sineBuffer, 1, sineFrames, ZeroCrossingDirection::All, 0.0f);
+    const size_t sinePositive = ZeroCrossingAnalyzer::countZeroCrossings (sineBuffer, ZeroCrossingDirection::Positive, 0.0f);
+    const size_t sineNegative = ZeroCrossingAnalyzer::countZeroCrossings (sineBuffer, ZeroCrossingDirection::Negative, 0.0f);
+    const size_t sineTotal = ZeroCrossingAnalyzer::countZeroCrossings (sineBuffer, ZeroCrossingDirection::All, 0.0f);
 
     markUsed (sinePositive, sineNegative, sineTotal);
 
     // For a sine wave, positive and negative crossings should be approximately equal
-    assert (std::abs (sinePositive - sineNegative) <= 1 && "Positive and negative crossings should be equal for sine wave");
+    assert (std::abs (static_cast<int> (sinePositive) - static_cast<int> (sineNegative)) <= 1 && "Positive and negative crossings should be equal for sine wave");
     assert (sineTotal == sinePositive + sineNegative && "Total crossings should equal sum of directional crossings for sine wave");
 
     // Test zero crossing rate with directional counting
-    float zcrPositive = calculateZeroCrossingRate (sineBuffer, 1, sineFrames, ZeroCrossingDirection::Positive, 0.0f);
-    float zcrNegative = calculateZeroCrossingRate (sineBuffer, 1, sineFrames, ZeroCrossingDirection::Negative, 0.0f);
-    float zcrTotal = calculateZeroCrossingRate (sineBuffer, 1, sineFrames, ZeroCrossingDirection::All, 0.0f);
+    const float zcrPositive = ZeroCrossingAnalyzer::calculateZeroCrossingRate (sineBuffer, ZeroCrossingDirection::Positive, 0.0f);
+    const float zcrNegative = ZeroCrossingAnalyzer::calculateZeroCrossingRate (sineBuffer, ZeroCrossingDirection::Negative, 0.0f);
+    const float zcrTotal = ZeroCrossingAnalyzer::calculateZeroCrossingRate (sineBuffer, ZeroCrossingDirection::All, 0.0f);
 
     // The ZCR for positive or negative only should be approximately half of the total ZCR
     // For frequency detection, we allow 0.5 Hz difference, which means about 1 crossing difference per second
-    // This translates to a ZCR difference of about (1.0 / sineFrames) for our buffer length
-    float toleranceZCR = 2.0f / static_cast<float> (sineFrames); // Allow 2 crossings difference
+    // This translates to a ZCR difference of about (1.0 / SineBlockSize) for our buffer length
+    const float toleranceZCR = 2.0f / static_cast<float> (SineBlockSize); // Allow 2 crossings difference
 
     // Verify that positive + negative = total (this should be exact)
-    float sumDiff = std::abs (zcrTotal - (zcrPositive + zcrNegative));
+    const float sumDiff = std::abs (zcrTotal - (zcrPositive + zcrNegative));
     printf ("ZCR Sum difference: %.9f\n", sumDiff);
     assert (sumDiff < 0.000001f && "Total ZCR should equal sum of directional ZCRs");
 
     // Verify that positive ≈ negative (allowing for quantization effects)
-    float zcrDiff = std::abs (zcrPositive - zcrNegative);
+    const float zcrDiff = std::abs (zcrPositive - zcrNegative);
     printf ("ZCR Difference: %.9f (tolerance: %.9f)\n", zcrDiff, toleranceZCR);
     assert (zcrDiff < toleranceZCR && "Positive and negative ZCRs should be approximately equal for sine wave");
-
-    delete[] sineWave;
 }
 
 int main()

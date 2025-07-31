@@ -6,6 +6,8 @@
 
 #pragma once
 #include <cmath>
+#include <span>
+#include <type_traits>
 
 namespace PlayfulTones::DspToolBox
 {
@@ -19,55 +21,71 @@ namespace PlayfulTones::DspToolBox
     };
 
     /**
-     * Counts the number of zero crossings in a multi-channel audio buffer.
-     * 
-     * @param buffer Pointer to an array of audio buffers, one for each channel.
-     * @param numChannels Number of audio channels.
-     * @param numFrames Number of frames (samples) in each channel.
-     * @param direction Which zero crossings to count (All, Positive, or Negative)
-     * @param hysteresis Optional hysteresis value to filter out noise.
-     * @return The number of zero crossings detected across all channels.
+     * Concept to validate audio buffer types
      */
-    inline int countZeroCrossings (float** buffer, int numChannels, int numFrames, ZeroCrossingDirection direction = ZeroCrossingDirection::All, float hysteresis = 0.0f)
+    template <typename T>
+    concept AudioBufferType = requires (T buffer) {
+        buffer.size();
+        buffer[0];
+        typename T::value_type;
+    };
+
+    /**
+     * Zero crossing analysis tools - stateless design following DSP toolbox patterns
+     */
+    class ZeroCrossingAnalyzer
     {
-        int zeroCrossings = 0;
-
-        for (int ch = 0; ch < numChannels; ch++)
+    public:
+        /**
+         * Counts zero crossings in a single channel buffer
+         * 
+         * @param buffer Single channel audio buffer
+         * @param direction Which zero crossings to count
+         * @param hysteresis Threshold to filter out noise
+         * @return Number of zero crossings detected
+         */
+        template <typename SampleType, size_t BlockSize>
+        [[nodiscard]] static constexpr size_t countZeroCrossings (
+            std::span<const SampleType, BlockSize> buffer,
+            ZeroCrossingDirection direction = ZeroCrossingDirection::All,
+            SampleType hysteresis = SampleType { 0 }) noexcept
         {
-            float prevSample = buffer[ch][0];
+            static_assert (std::is_floating_point_v<SampleType>, "SampleType must be floating point");
 
-            for (int i = 1; i < numFrames; i++)
+            if constexpr (BlockSize <= 1)
             {
-                float currentSample = buffer[ch][i];
+                return 0;
+            }
+
+            size_t zeroCrossings = 0;
+            SampleType prevSample = buffer[0];
+
+            for (size_t i = 1; i < BlockSize; ++i)
+            {
+                const SampleType currentSample = buffer[i];
 
                 // Detect zero crossing by sign change
                 if (std::signbit (prevSample) != std::signbit (currentSample))
                 {
-                    // Determine crossing direction
-                    bool isPositiveGoing = prevSample < 0.0f && currentSample > 0.0f;
+                    const bool isPositiveGoing = prevSample < SampleType { 0 } && currentSample > SampleType { 0 };
 
                     // Check if we should count this crossing based on direction
-                    bool shouldCount =
+                    const bool shouldCount =
                         direction == ZeroCrossingDirection::All || (direction == ZeroCrossingDirection::Positive && isPositiveGoing) || (direction == ZeroCrossingDirection::Negative && !isPositiveGoing);
 
                     if (shouldCount)
                     {
-                        // Linear interpolation to get a more precise crossing point
-                        float t = -prevSample / (currentSample - prevSample);
-
-                        // Validate the crossing
-                        if (hysteresis == 0.0f)
+                        if (hysteresis == SampleType { 0 })
                         {
-                            // For basic tests, just count sign changes
-                            zeroCrossings++;
+                            ++zeroCrossings;
                         }
-                        else if (t >= 0.0f && t <= 1.0f)
+                        else
                         {
-                            // For real signals, ensure we have a valid crossing
-                            float slope = currentSample - prevSample;
-                            if (std::abs (slope) > hysteresis) // Check if we're moving fast enough through zero
+                            // Check slope magnitude against hysteresis
+                            const SampleType slope = std::abs (currentSample - prevSample);
+                            if (slope > hysteresis)
                             {
-                                zeroCrossings++;
+                                ++zeroCrossings;
                             }
                         }
                     }
@@ -75,26 +93,103 @@ namespace PlayfulTones::DspToolBox
 
                 prevSample = currentSample;
             }
+
+            return zeroCrossings;
         }
 
-        return zeroCrossings;
-    }
+        /**
+         * Counts zero crossings in a multi-channel audio buffer
+         * 
+         * @param buffer Multi-channel audio buffer
+         * @param direction Which zero crossings to count
+         * @param hysteresis Threshold to filter out noise
+         * @return Total number of zero crossings across all channels
+         */
+        template <AudioBufferType AudioBuffer, typename SampleType = typename AudioBuffer::value_type::value_type>
+        [[nodiscard]] static constexpr size_t countZeroCrossings (
+            const AudioBuffer& buffer,
+            ZeroCrossingDirection direction = ZeroCrossingDirection::All,
+            SampleType hysteresis = SampleType { 0 }) noexcept
+        {
+            static_assert (std::is_floating_point_v<SampleType>, "SampleType must be floating point");
 
-    /**
-     * Calculates the zero-crossing rate (ZCR) for a multi-channel audio buffer.
-     * The ZCR is defined as the number of zero crossings divided by the frame length.
-     * 
-     * @param buffer Pointer to an array of audio buffers, one for each channel.
-     * @param numChannels Number of audio channels.
-     * @param numFrames Number of frames (samples) in each channel.
-     * @param direction Which zero crossings to count (All, Positive, or Negative)
-     * @param hysteresis Optional hysteresis value to filter out noise.
-     * @return The zero-crossing rate across all channels (crossings per sample).
-     */
-    inline float calculateZeroCrossingRate (float** buffer, int numChannels, int numFrames, ZeroCrossingDirection direction = ZeroCrossingDirection::All, float hysteresis = 0.0f)
-    {
-        int zeroCrossings = countZeroCrossings (buffer, numChannels, numFrames, direction, hysteresis);
-        return static_cast<float> (zeroCrossings) / static_cast<float> (numFrames * numChannels);
-    }
+            size_t totalCrossings = 0;
+
+            for (const auto& channel : buffer)
+            {
+                totalCrossings += countZeroCrossings (channel, direction, hysteresis);
+            }
+
+            return totalCrossings;
+        }
+
+        /**
+         * Calculates zero-crossing rate for a single channel
+         * 
+         * @param buffer Single channel audio buffer
+         * @param direction Which zero crossings to count
+         * @param hysteresis Threshold to filter out noise
+         * @return Zero-crossing rate (crossings per sample)
+         */
+        template <typename SampleType, size_t BlockSize>
+        [[nodiscard]] static constexpr SampleType calculateZeroCrossingRate (
+            std::span<const SampleType, BlockSize> buffer,
+            ZeroCrossingDirection direction = ZeroCrossingDirection::All,
+            SampleType hysteresis = SampleType { 0 }) noexcept
+        {
+            static_assert (std::is_floating_point_v<SampleType>, "SampleType must be floating point");
+
+            if constexpr (BlockSize == 0)
+            {
+                return SampleType { 0 };
+            }
+
+            const size_t crossings = countZeroCrossings (buffer, direction, hysteresis);
+            return static_cast<SampleType> (crossings) / static_cast<SampleType> (BlockSize);
+        }
+
+        /**
+         * Calculates zero-crossing rate for a multi-channel buffer
+         * 
+         * @param buffer Multi-channel audio buffer
+         * @param direction Which zero crossings to count
+         * @param hysteresis Threshold to filter out noise
+         * @return Average zero-crossing rate across all channels
+         */
+        template <AudioBufferType AudioBuffer, typename SampleType = typename AudioBuffer::value_type::value_type>
+        [[nodiscard]] static constexpr SampleType calculateZeroCrossingRate (
+            const AudioBuffer& buffer,
+            ZeroCrossingDirection direction = ZeroCrossingDirection::All,
+            SampleType hysteresis = SampleType { 0 }) noexcept
+        {
+            static_assert (std::is_floating_point_v<SampleType>, "SampleType must be floating point");
+
+            if (buffer.empty())
+            {
+                return SampleType { 0 };
+            }
+
+            const size_t totalCrossings = countZeroCrossings (buffer, direction, hysteresis);
+            const size_t totalSamples = buffer.size() * buffer[0].size();
+
+            return static_cast<SampleType> (totalCrossings) / static_cast<SampleType> (totalSamples);
+        }
+
+        /**
+         * Estimates fundamental frequency from zero-crossing rate
+         * 
+         * @param zcr Zero-crossing rate
+         * @param sampleRate Sample rate in Hz
+         * @return Estimated frequency in Hz
+         */
+        template <typename SampleType>
+        [[nodiscard]] static constexpr SampleType estimateFrequencyFromZCR (
+            SampleType zcr,
+            SampleType sampleRate) noexcept
+        {
+            static_assert (std::is_floating_point_v<SampleType>, "SampleType must be floating point");
+            return (zcr * sampleRate) / SampleType { 2 };
+        }
+    };
 
 } // namespace PlayfulTones::DspToolBox
