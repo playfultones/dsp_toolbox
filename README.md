@@ -2,7 +2,7 @@
 
 ## Core Design Principles
 
-This are the fundamental design principles taken into consideration for this library.
+These are the fundamental design principles taken into consideration for this library.
 
 ### Memory & Performance
 
