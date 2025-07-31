@@ -93,7 +93,7 @@ namespace PlayfulTones::DspToolBox
          * @param inputChannel The input channel on this node
          * @return True if the connection was successful
          */
-        bool addInputConnection(Ptr sourceNode, int outputChannel = 0, int inputChannel = 0)
+        bool addInputConnection(Ptr sourceNode, int outputChannel = 0, int inputChannel = 0) noexcept
         {
             if (!sourceNode)
                 return false;
@@ -109,7 +109,7 @@ namespace PlayfulTones::DspToolBox
          * @param inputChannel The input channel on this node
          * @return True if a connection was removed
          */
-        bool removeInputConnection(Ptr sourceNode, int outputChannel = 0, int inputChannel = 0)
+        bool removeInputConnection(Ptr sourceNode, int outputChannel = 0, int inputChannel = 0) noexcept
         {
             if (!sourceNode)
                 return false;
@@ -129,7 +129,7 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Clear all input connections
          */
-        void clearInputConnections()
+        void clearInputConnections() noexcept
         {
             inputs_.clear();
         }
@@ -138,7 +138,7 @@ namespace PlayfulTones::DspToolBox
          * @brief Get all input connections for this node
          * @return Map of input channels to connections
          */
-        const std::unordered_map<int, std::vector<Connection>>& getInputConnections() const
+        const std::unordered_map<int, std::vector<Connection>>& getInputConnections() const noexcept
         {
             return inputs_;
         }
@@ -200,9 +200,9 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Get processor configuration
          */
-        size_t getBlockSize() const { return processor_->get_block_size(); }
-        size_t getSampleRate() const { return processor_->get_sample_rate(); }
-        size_t getNumChannels() const { return processor_->get_num_channels(); }
+        size_t getBlockSize() const noexcept { return processor_->get_block_size(); }
+        size_t getSampleRate() const noexcept { return processor_->get_sample_rate(); }
+        size_t getNumChannels() const noexcept { return processor_->get_num_channels(); }
 
     private:
         std::unique_ptr<ProcessorInterface> processor_;

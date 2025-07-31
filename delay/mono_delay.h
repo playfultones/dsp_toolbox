@@ -88,29 +88,44 @@ namespace PlayfulTones::DspToolBox
             const sample_type currentMix = mix_.load(std::memory_order_relaxed);
             const size_t currentDelaySamples = delaySamples_.load(std::memory_order_relaxed);
 
+            // Precompute mix coefficients for better performance
+            const sample_type dryGain = sample_type{1} - currentMix;
+            const sample_type wetGain = currentMix;
+
             for (size_t ch = 0; ch < numChannels; ++ch)
             {
                 auto& delayBuffer = delayBuffers_[ch];
+                sample_type* channelData = buffer[ch].data();
                 
                 for (size_t i = 0; i < numFrames; ++i)
                 {
-                    const sample_type inputSample = buffer[ch][i];
+                    const sample_type inputSample = channelData[i];
                     sample_type delaySample = sample_type{0};
                     
                     // Read the delayed sample
                     delayBuffer.peekAt(delaySample, currentDelaySamples);
 
-                    // Calculate the output sample with dry/wet mix
-                    buffer[ch][i] = (sample_type{1} - currentMix) * inputSample + currentMix * delaySample;
+                    // Prevent denormals in delay sample
+                    constexpr sample_type kDenormalEpsilon = sample_type{1e-30};
+                    if (std::abs(delaySample) < kDenormalEpsilon)
+                        delaySample = sample_type{0};
+
+                    // Calculate the output sample with dry/wet mix (branchless)
+                    channelData[i] = dryGain * inputSample + wetGain * delaySample;
+
+                    // Calculate feedback sample with denormal protection
+                    sample_type feedbackSample = inputSample + currentFeedback * delaySample;
+                    if (std::abs(feedbackSample) < kDenormalEpsilon)
+                        feedbackSample = sample_type{0};
 
                     // Discard the oldest sample if the buffer is full
-                    if (delayBuffer.isFull())
+                    if (delayBuffer.isFull()) [[unlikely]]
                     {
                         delayBuffer.discard(1);
                     }
 
                     // Write input + feedback to the delay buffer
-                    delayBuffer.push(inputSample + currentFeedback * delaySample);
+                    delayBuffer.push(feedbackSample);
                 }
             }
         }

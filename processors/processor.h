@@ -10,6 +10,10 @@
 #include <concepts>
 #include <type_traits>
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    #include <immintrin.h>
+#endif
+
 namespace PlayfulTones::DspToolBox
 {
     /**
@@ -49,6 +53,8 @@ namespace PlayfulTones::DspToolBox
          */
         void process_audio(AudioBuffer& buffer) noexcept
         {
+            // Handle denormals by flushing to zero if needed
+            flush_denormals();
             static_cast<Derived*>(this)->process_audio_impl(buffer);
         }
         
@@ -122,6 +128,19 @@ namespace PlayfulTones::DspToolBox
         {
             // Default: no reset needed
         }
+
+    private:
+        /**
+         * @brief Handle denormal numbers by setting flush-to-zero
+         */
+        static void flush_denormals() noexcept
+        {
+            #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+                // Set flush-to-zero and denormals-are-zero on x86/x64
+                _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+                _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+            #endif
+        }
     };
     
     /**
@@ -146,13 +165,13 @@ namespace PlayfulTones::DspToolBox
     {
     public:
         virtual ~ProcessorInterface() = default;
-        virtual void process_audio_erased(void* buffer) = 0;
-        virtual void process_control() = 0;
-        virtual void prepare() = 0;
-        virtual void reset() = 0;
-        virtual size_t get_block_size() const = 0;
-        virtual size_t get_sample_rate() const = 0;
-        virtual size_t get_num_channels() const = 0;
+        virtual void process_audio_erased(void* buffer) noexcept = 0;
+        virtual void process_control() noexcept = 0;
+        virtual void prepare() noexcept = 0;
+        virtual void reset() noexcept = 0;
+        virtual size_t get_block_size() const noexcept = 0;
+        virtual size_t get_sample_rate() const noexcept = 0;
+        virtual size_t get_num_channels() const noexcept = 0;
     };
     
     /**
@@ -165,38 +184,38 @@ namespace PlayfulTones::DspToolBox
         template<typename... Args>
         ProcessorWrapper(Args&&... args) : processor_(std::forward<Args>(args)...) {}
         
-        void process_audio_erased(void* buffer) override
+        void process_audio_erased(void* buffer) noexcept override
         {
             auto* typed_buffer = static_cast<typename P::AudioBuffer*>(buffer);
             processor_.process_audio(*typed_buffer);
         }
         
-        void process_control() override
+        void process_control() noexcept override
         {
             processor_.process_control();
         }
         
-        void prepare() override
+        void prepare() noexcept override
         {
             processor_.prepare();
         }
         
-        void reset() override
+        void reset() noexcept override
         {
             processor_.reset();
         }
         
-        size_t get_block_size() const override
+        size_t get_block_size() const noexcept override
         {
             return P::block_size;
         }
         
-        size_t get_sample_rate() const override
+        size_t get_sample_rate() const noexcept override
         {
             return P::sample_rate;
         }
         
-        size_t get_num_channels() const override
+        size_t get_num_channels() const noexcept override
         {
             return P::num_channels;
         }

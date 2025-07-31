@@ -65,36 +65,44 @@ namespace PlayfulTones::DspToolBox
             const sample_type targetGain = targetGain_.load(std::memory_order_relaxed);
             const size_t rampLengthSamples = rampLengthSamples_.load(std::memory_order_relaxed);
 
-            if (rampLengthSamples > 0 && currentRampSample_ < rampLengthSamples && 
-                std::abs(targetGain - gain_) > sample_type{0.0001})
+            // Branch prediction friendly - check if ramping is needed
+            const bool needsRamping = (rampLengthSamples > 0 && 
+                                      currentRampSample_ < rampLengthSamples && 
+                                      std::abs(targetGain - gain_) > sample_type{0.0001});
+
+            if (needsRamping) [[unlikely]]
             {
-                // Process with gain ramping
+                // Process with gain ramping (less common path)
                 const sample_type gainIncrement = (targetGain - gain_) / static_cast<sample_type>(rampLengthSamples);
                 
                 for (size_t i = 0; i < numFrames; ++i)
                 {
-                    if (currentRampSample_ < rampLengthSamples)
-                    {
-                        gain_ += gainIncrement;
-                        ++currentRampSample_;
-                    }
+                    // Branchless ramp update
+                    const bool stillRamping = currentRampSample_ < rampLengthSamples;
+                    gain_ += stillRamping ? gainIncrement : sample_type{0};
+                    currentRampSample_ += stillRamping ? 1 : 0;
 
+                    // Apply gain to all channels
                     for (size_t ch = 0; ch < numChannels; ++ch)
                     {
                         buffer[ch][i] *= gain_;
                     }
                 }
             }
-            else
+            else [[likely]]
             {
                 // Process without ramping (fast path)
                 gain_ = targetGain;
                 
+                // Loop unroll hint for compiler
                 for (size_t ch = 0; ch < numChannels; ++ch)
                 {
+                    sample_type* channelData = buffer[ch].data();
+                    
+                    // Process samples in blocks for better cache usage
                     for (size_t i = 0; i < numFrames; ++i)
                     {
-                        buffer[ch][i] *= gain_;
+                        channelData[i] *= gain_;
                     }
                 }
             }

@@ -162,7 +162,7 @@ namespace PlayfulTones::DspToolBox
          * @brief Get the output node of the graph
          * @return The output node pointer
          */
-        NodePtr getOutputNode()
+        NodePtr getOutputNode() noexcept
         {
             return graph_.getBuilder().getOutputNode();
         }
@@ -170,9 +170,9 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Get compile-time configuration
          */
-        static constexpr size_t getBlockSize() { return BlockSize; }
-        static constexpr size_t getSampleRate() { return SampleRate; }
-        static constexpr size_t getNumChannels() { return NumChannels; }
+        static constexpr size_t getBlockSize() noexcept { return BlockSize; }
+        static constexpr size_t getSampleRate() noexcept { return SampleRate; }
+        static constexpr size_t getNumChannels() noexcept { return NumChannels; }
 
     private:
         GraphType graph_;

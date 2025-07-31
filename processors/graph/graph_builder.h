@@ -66,7 +66,7 @@ namespace PlayfulTones::DspToolBox
          * @param id The ID of the node to remove
          * @return True if the node was found and removed
          */
-        bool removeNode(NodeId id)
+        bool removeNode(NodeId id) noexcept
         {
             return nodes_.erase(id) > 0;
         }
@@ -79,7 +79,7 @@ namespace PlayfulTones::DspToolBox
          * @param inputChannel The input channel on the target node
          * @return True if the connection was successful
          */
-        bool connect(NodeId sourceId, NodeId targetId, int outputChannel = 0, int inputChannel = 0)
+        bool connect(NodeId sourceId, NodeId targetId, int outputChannel = 0, int inputChannel = 0) noexcept
         {
             auto sourceIt = nodes_.find(sourceId);
             auto targetIt = nodes_.find(targetId);
@@ -98,7 +98,7 @@ namespace PlayfulTones::DspToolBox
          * @param inputChannel The input channel on the target node
          * @return True if the disconnection was successful
          */
-        bool disconnect(NodeId sourceId, NodeId targetId, int outputChannel = 0, int inputChannel = 0)
+        bool disconnect(NodeId sourceId, NodeId targetId, int outputChannel = 0, int inputChannel = 0) noexcept
         {
             auto sourceIt = nodes_.find(sourceId);
             auto targetIt = nodes_.find(targetId);
@@ -114,7 +114,7 @@ namespace PlayfulTones::DspToolBox
          * @param id The ID of the node to get
          * @return Shared pointer to the node, or nullptr if not found
          */
-        NodePtr getNode(NodeId id)
+        NodePtr getNode(NodeId id) noexcept
         {
             auto it = nodes_.find(id);
             return (it != nodes_.end()) ? it->second : nullptr;
@@ -124,7 +124,7 @@ namespace PlayfulTones::DspToolBox
          * @brief Gets the output node of the graph
          * @return Shared pointer to the output node
          */
-        NodePtr getOutputNode() const
+        NodePtr getOutputNode() const noexcept
         {
             return outputNode_;
         }
@@ -236,9 +236,9 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Get compile-time configuration
          */
-        static constexpr size_t getBlockSize() { return BlockSize; }
-        static constexpr size_t getSampleRate() { return SampleRate; }
-        static constexpr size_t getNumChannels() { return NumChannels; }
+        static constexpr size_t getBlockSize() noexcept { return BlockSize; }
+        static constexpr size_t getSampleRate() noexcept { return SampleRate; }
+        static constexpr size_t getNumChannels() noexcept { return NumChannels; }
 
     private:
         void createOutputNode()
