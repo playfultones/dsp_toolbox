@@ -40,7 +40,9 @@ namespace PlayfulTones::DspToolBox
          * @param ticksPerQuarterNote The number of ticks per quarter note (default: 960)
          * @throws std::runtime_error if file cannot be opened or written
          */
-        static void writeToFile (const MidiSequence& sequence, const std::string& filePath, uint16_t ticksPerQuarterNote = 960)
+        template<typename TimestampType, size_t MaxMessages>
+        static void writeToFile(const MidiSequence<TimestampType, MaxMessages>& sequence, 
+                              const std::string& filePath, uint16_t ticksPerQuarterNote = 960)
         {
             std::ofstream file (filePath, std::ios::binary);
             if (!file)
@@ -62,16 +64,17 @@ namespace PlayfulTones::DspToolBox
             auto trackLengthPos = file.tellp();
             writeUint32 (file, 0); // Placeholder for track length
 
-            uint64_t runningTime = 0;
-            const auto& messages = sequence.getAllMessages();
+            TimestampType runningTime = TimestampType{0};
+            const auto messages = sequence.getAllMessages();
 
             // Write track events
             for (const auto& timedMsg : messages)
             {
                 // Write delta time (time since last event)
-                uint64_t delta = timedMsg.timestamp - runningTime;
-                writeVariableLength (file, delta);
-                runningTime = timedMsg.timestamp;
+                auto currentTime = static_cast<TimestampType>(timedMsg.timestamp);
+                auto delta = static_cast<uint64_t>(currentTime - runningTime);
+                writeVariableLength(file, delta);
+                runningTime = currentTime;
 
                 // Write MIDI message
                 file.put (static_cast<unsigned char> (timedMsg.message.getStatus()));

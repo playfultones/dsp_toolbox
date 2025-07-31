@@ -36,9 +36,9 @@ namespace PlayfulTones::DspToolBox
          *        A pattern is either a single cell or a cell followed by another pattern
          * @return Generated MIDI sequence
          */
-        MidiSequence generatePattern()
+        MidiSequence64 generatePattern()
         {
-            MidiSequence sequence;
+            MidiSequence64 sequence;
 
             if (m_scale.empty())
                 return sequence; // No scale set, return empty sequence
@@ -112,7 +112,7 @@ namespace PlayfulTones::DspToolBox
          * @param startTime Start time for this pattern
          * @return End time of the generated pattern
          */
-        uint64_t generatePatternRecursive (MidiSequence& sequence, uint64_t startTime)
+        uint64_t generatePatternRecursive (MidiSequence64& sequence, uint64_t startTime)
         {
             // Generate the first cell
             uint64_t currentTime = generateCell (sequence, startTime);
@@ -136,7 +136,7 @@ namespace PlayfulTones::DspToolBox
          * @param startTime Start time for this cell
          * @return End time of the generated cell
          */
-        uint64_t generateCell (MidiSequence& sequence, uint64_t startTime)
+        uint64_t generateCell (MidiSequence64& sequence, uint64_t startTime)
         {
             // Randomly choose between 2-beat and 3-beat cell
             bool isTwoBeats = std::uniform_int_distribution<> { 0, 1 }(m_rng) == 0;
@@ -157,7 +157,7 @@ namespace PlayfulTones::DspToolBox
          * @param startTime Start time for this cell
          * @return End time of the generated cell
          */
-        uint64_t generateTwoBeatsCell (MidiSequence& sequence, uint64_t startTime)
+        uint64_t generateTwoBeatsCell (MidiSequence64& sequence, uint64_t startTime)
         {
             using namespace MusicalTime;
 
@@ -190,7 +190,7 @@ namespace PlayfulTones::DspToolBox
          * @param startTime Start time for this cell
          * @return End time of the generated cell
          */
-        uint64_t generateThreeBeatsCell (MidiSequence& sequence, uint64_t startTime)
+        uint64_t generateThreeBeatsCell (MidiSequence64& sequence, uint64_t startTime)
         {
             using namespace MusicalTime;
 
@@ -247,7 +247,7 @@ namespace PlayfulTones::DspToolBox
          * @param startTime Start time for the note/rest
          * @param duration Duration of the note/rest in ticks
          */
-        void addNoteOrRest (MidiSequence& sequence, uint64_t startTime, uint64_t duration)
+        void addNoteOrRest (MidiSequence64& sequence, uint64_t startTime, uint64_t duration)
         {
             // 50% chance of rest vs note
             if (std::uniform_int_distribution<> { 0, 1 }(m_rng) == 0)
@@ -260,12 +260,18 @@ namespace PlayfulTones::DspToolBox
             uint8_t note = m_rootNote + m_scale[scaleIndex];
 
             // Add note on
-            sequence.addMessage (startTime,
-                MidiMessage (MidiStatus::NoteOn, m_channel, note, getRandomVelocity()));
+            if (!sequence.addMessage (Timestamp<uint64_t>(startTime),
+                MidiMessage (MidiStatus::NoteOn, MidiChannel(m_channel), NoteNumber(note), Velocity(getRandomVelocity()))))
+            {
+                return; // Sequence is full, stop adding messages
+            }
 
             // Add note off
-            sequence.addMessage (startTime + duration,
-                MidiMessage (MidiStatus::NoteOff, m_channel, note));
+            if (!sequence.addMessage (Timestamp<uint64_t>(startTime + duration),
+                MidiMessage (MidiStatus::NoteOff, MidiChannel(m_channel), NoteNumber(note), Velocity(0))))
+            {
+                return; // Sequence is full, stop adding messages
+            }
         }
     };
 }

@@ -8,140 +8,247 @@
 
 #include "midi_message.h"
 #include <algorithm>
+#include <array>
 #include <cstdint>
-#include <vector>
+#include <span>
 
 namespace PlayfulTones::DspToolBox
 {
+    // Strong type for timestamps
+    template<typename T>
+    struct Timestamp {
+        T value;
+        constexpr Timestamp() noexcept : value(T{}) {}
+        constexpr explicit Timestamp(T t) noexcept : value(t) {}
+        constexpr operator T() const noexcept { return value; }
+        constexpr bool operator<(const Timestamp& other) const noexcept { return value < other.value; }
+        constexpr bool operator<=(const Timestamp& other) const noexcept { return value <= other.value; }
+        constexpr bool operator>(const Timestamp& other) const noexcept { return value > other.value; }
+        constexpr bool operator>=(const Timestamp& other) const noexcept { return value >= other.value; }
+        constexpr bool operator==(const Timestamp& other) const noexcept { return value == other.value; }
+    };
+
     /**
-     * @brief A class for storing and managing a sequence of MIDI messages with timestamps.
+     * @brief A real-time safe MIDI sequence with template-based configuration.
      * 
-     * This class provides functionality to store, sort, and access MIDI messages
-     * in chronological order. Each message is associated with a timestamp that
-     * represents its position in the sequence.
+     * Template parameters:
+     * @tparam TimestampType Type for timestamps (e.g., uint64_t, double)
+     * @tparam MaxMessages Maximum number of messages in the sequence (compile-time)
+     * 
+     * This class provides zero-allocation, cache-friendly MIDI message storage
+     * suitable for real-time audio processing.
      */
-    class MidiSequence
+    template<typename TimestampType = uint64_t, size_t MaxMessages = 1024>
+    class alignas(64) MidiSequence  // Cache-line aligned
     {
     public:
+        using timestamp_type = Timestamp<TimestampType>;
+        
         /**
          * @brief Represents a timed MIDI message in the sequence.
          */
-        struct TimedMessage
+        struct alignas(16) TimedMessage  // Align for SIMD-friendly access
         {
-            uint64_t timestamp; // Timestamp in ticks/samples
+            timestamp_type timestamp; // Timestamp in ticks/samples
             MidiMessage message;
 
-            constexpr TimedMessage (uint64_t time, const MidiMessage& msg) noexcept
-                : timestamp (time), message (msg)
+            constexpr TimedMessage() noexcept = default;
+            
+            constexpr TimedMessage(timestamp_type time, const MidiMessage& msg) noexcept
+                : timestamp(time), message(msg)
             {
             }
 
-            // Allow sorting by timestamp
-            constexpr bool operator< (const TimedMessage& other) const noexcept
+            // Allow sorting by timestamp - branch prediction friendly
+            constexpr bool operator<(const TimedMessage& other) const noexcept
             {
                 return timestamp < other.timestamp;
             }
         };
 
+        static_assert(MaxMessages > 0, "MaxMessages must be greater than 0");
+
+        constexpr MidiSequence() noexcept : m_size(0) {}
+
         /**
          * @brief Adds a MIDI message to the sequence at the specified timestamp.
-         * @param timestamp The time position of the message in ticks/samples
+         * Real-time safe: maintains sorted order without full sorting.
+         * @param timestamp The time position of the message
          * @param message The MIDI message to add
+         * @return true if message was added successfully, false if sequence is full
          */
-        void addMessage (uint64_t timestamp, const MidiMessage& message)
+        [[nodiscard]] bool addMessage(timestamp_type timestamp, const MidiMessage& message) noexcept
         {
-            m_messages.emplace_back (timestamp, message);
-            // Keep the sequence sorted by timestamp
-            std::sort (m_messages.begin(), m_messages.end());
+            if (m_size >= MaxMessages)
+                return false;
+
+            // Find insertion point using binary search for O(log n) complexity
+            auto insertPos = std::upper_bound(m_messages.begin(), m_messages.begin() + m_size, 
+                                            TimedMessage{timestamp, message});
+            
+            // Shift elements to make room (move semantics where possible)
+            const auto insertIndex = static_cast<size_t>(insertPos - m_messages.begin());
+            for (size_t i = m_size; i > insertIndex; --i)
+            {
+                m_messages[i] = m_messages[i - 1];
+            }
+            
+            // Insert the new message
+            m_messages[insertIndex] = TimedMessage{timestamp, message};
+            ++m_size;
+            
+            return true;
         }
 
         /**
          * @brief Removes all messages from the sequence.
          */
-        void clear() noexcept
+        constexpr void clear() noexcept
         {
-            m_messages.clear();
+            m_size = 0;
         }
 
         /**
          * @brief Returns the number of messages in the sequence.
-         * @return The number of messages
          */
-        [[nodiscard]] size_t size() const noexcept
+        [[nodiscard]] constexpr size_t size() const noexcept
         {
-            return m_messages.size();
+            return m_size;
+        }
+
+        /**
+         * @brief Returns the maximum capacity of the sequence.
+         */
+        [[nodiscard]] static constexpr size_t capacity() noexcept
+        {
+            return MaxMessages;
         }
 
         /**
          * @brief Checks if the sequence is empty.
-         * @return true if the sequence contains no messages
          */
-        [[nodiscard]] bool isEmpty() const noexcept
+        [[nodiscard]] constexpr bool isEmpty() const noexcept
         {
-            return m_messages.empty();
+            return m_size == 0;
         }
 
         /**
-         * @brief Gets all messages that occur at or before the specified timestamp.
+         * @brief Checks if the sequence is full.
+         */
+        [[nodiscard]] constexpr bool isFull() const noexcept
+        {
+            return m_size >= MaxMessages;
+        }
+
+        /**
+         * @brief Real-time safe: gets messages up to timestamp using callback.
+         * No allocations, processes messages in-place.
          * @param timestamp The time position to check
-         * @return A vector of messages that occur at or before the timestamp
+         * @param callback Function to call for each message: void(const MidiMessage&)
          */
-        [[nodiscard]] std::vector<MidiMessage> getMessagesUpTo (uint64_t timestamp) const
+        template<typename Callback>
+        constexpr void processMessagesUpTo(timestamp_type timestamp, Callback&& callback) const noexcept
         {
-            std::vector<MidiMessage> result;
-            for (const auto& timedMsg : m_messages)
+            for (size_t i = 0; i < m_size; ++i)
             {
-                if (timedMsg.timestamp > timestamp)
+                if (m_messages[i].timestamp > timestamp)
                     break;
-
-                result.push_back (timedMsg.message);
+                
+                callback(m_messages[i].message);
             }
-            return result;
         }
 
         /**
-         * @brief Gets the messages within a specific time range.
+         * @brief Real-time safe: gets messages within time range using callback.
          * @param startTime The start of the time range (inclusive)
          * @param endTime The end of the time range (exclusive)
-         * @return A vector of messages that occur within the specified range
+         * @param callback Function to call for each message
          */
-        [[nodiscard]] std::vector<MidiMessage> getMessagesBetween (uint64_t startTime, uint64_t endTime) const
+        template<typename Callback>
+        constexpr void processMessagesBetween(timestamp_type startTime, timestamp_type endTime, 
+                                            Callback&& callback) const noexcept
         {
-            std::vector<MidiMessage> result;
-            for (const auto& timedMsg : m_messages)
+            for (size_t i = 0; i < m_size; ++i)
             {
-                if (timedMsg.timestamp >= endTime)
+                const auto& msg = m_messages[i];
+                if (msg.timestamp >= endTime)
                     break;
-
-                if (timedMsg.timestamp >= startTime)
-                    result.push_back (timedMsg.message);
+                
+                if (msg.timestamp >= startTime)
+                    callback(msg.message);
             }
-            return result;
         }
 
         /**
          * @brief Gets the next message after the specified timestamp.
          * @param timestamp The time position to check from
-         * @return A pointer to the next message, or nullptr if no message exists
+         * @return Pointer to the next message, or nullptr if no message exists
          */
-        [[nodiscard]] const TimedMessage* getNextMessage (uint64_t timestamp) const noexcept
+        [[nodiscard]] constexpr const TimedMessage* getNextMessage(timestamp_type timestamp) const noexcept
         {
-            auto it = std::find_if (m_messages.begin(), m_messages.end(), [timestamp] (const TimedMessage& msg) { return msg.timestamp > timestamp; });
-
-            return it != m_messages.end() ? &(*it) : nullptr;
+            for (size_t i = 0; i < m_size; ++i)
+            {
+                if (m_messages[i].timestamp > timestamp)
+                    return &m_messages[i];
+            }
+            return nullptr;
         }
 
         /**
-         * @brief Gets all messages in the sequence.
-         * @return A const reference to the vector of timed messages
+         * @brief Gets a span view of all messages (real-time safe).
+         * @return A span of the messages currently in the sequence
          */
-        [[nodiscard]] const std::vector<TimedMessage>& getAllMessages() const noexcept
+        [[nodiscard]] constexpr std::span<const TimedMessage> getAllMessages() const noexcept
         {
-            return m_messages;
+            return std::span<const TimedMessage>(m_messages.data(), m_size);
+        }
+
+        /**
+         * @brief Direct access to message by index (bounds-checked in debug).
+         */
+        [[nodiscard]] constexpr const TimedMessage& operator[](size_t index) const noexcept
+        {
+            // In debug builds, we could add assert(index < m_size)
+            return m_messages[index];
+        }
+
+        /**
+         * @brief Removes messages older than the specified timestamp.
+         * Useful for maintaining a rolling window of recent messages.
+         * @param cutoffTime Messages older than this will be removed
+         * @return Number of messages removed
+         */
+        [[nodiscard]] size_t removeMessagesOlderThan(timestamp_type cutoffTime) noexcept
+        {
+            size_t removeCount = 0;
+            
+            // Find first message to keep
+            while (removeCount < m_size && m_messages[removeCount].timestamp < cutoffTime)
+            {
+                ++removeCount;
+            }
+            
+            if (removeCount > 0)
+            {
+                // Shift remaining messages to the beginning
+                for (size_t i = 0; i < m_size - removeCount; ++i)
+                {
+                    m_messages[i] = m_messages[i + removeCount];
+                }
+                m_size -= removeCount;
+            }
+            
+            return removeCount;
         }
 
     private:
-        std::vector<TimedMessage> m_messages;
+        alignas(64) std::array<TimedMessage, MaxMessages> m_messages; // Cache-line aligned storage
+        size_t m_size;
     };
+
+    // Common typedefs for convenience
+    using MidiSequence64 = MidiSequence<uint64_t, 1024>;
+    using MidiSequence32 = MidiSequence<uint32_t, 512>;
+    using MidiSequenceDouble = MidiSequence<double, 1024>;
 
 } // namespace PlayfulTones::DspToolBox

@@ -12,80 +12,91 @@ using namespace PlayfulTones::DspToolBox;
 
 void testMidiMessageConstructionAndBasicProperties()
 {
-    // Channel Voice Message Construction
+    // Channel Voice Message Construction with strong types
     {
-        MidiMessage noteOn (MidiStatus::NoteOn, 0, 60, 100);
-        assert (noteOn.getStatus() == 0x90);
-        assert (noteOn.getChannel() == 0);
-        assert (noteOn.getData1() == 60);
-        assert (noteOn.getData2() == 100);
+        MidiMessage noteOn(MidiStatus::NoteOn, MidiChannel(0), NoteNumber(60), Velocity(100));
+        assert(noteOn.getStatus() == 0x90);
+        assert(static_cast<uint8_t>(noteOn.getChannel()) == 0);
+        assert(static_cast<uint8_t>(noteOn.getNoteNumber()) == 60);
+        assert(static_cast<uint8_t>(noteOn.getVelocity()) == 100);
+        assert(noteOn.getData1() == 60);
+        assert(noteOn.getData2() == 100);
+    }
+
+    // Control Change Construction with strong types
+    {
+        MidiMessage cc(MidiChannel(1), ControllerNumber(7), ControllerValue(127));
+        assert(cc.getStatus() == 0xB1);
+        assert(static_cast<uint8_t>(cc.getChannel()) == 1);
+        assert(static_cast<uint8_t>(cc.getControllerNumber()) == 7);
+        assert(static_cast<uint8_t>(cc.getControllerValue()) == 127);
     }
 
     // System Message Construction
     {
-        MidiMessage sysEx (0xF0, 0x7E, 0x7F);
-        assert (sysEx.getStatus() == 0xF0);
-        assert (sysEx.getData1() == 0x7E);
-        assert (sysEx.getData2() == 0x7F);
+        MidiMessage sysEx(0xF0, 0x7E, 0x7F);
+        assert(sysEx.getStatus() == 0xF0);
+        assert(sysEx.getData1() == 0x7E);
+        assert(sysEx.getData2() == 0x7F);
     }
 }
 
 void testMidiMessageChannelHandling()
 {
-    // Test all 16 MIDI channels
+    // Test all 16 MIDI channels with strong types
     for (uint8_t channel = 0; channel < 16; ++channel)
     {
-        MidiMessage msg (MidiStatus::NoteOn, channel, 60, 100);
-        assert (msg.getChannel() == channel);
-        assert ((msg.getStatus() & 0x0F) == channel);
-        assert ((msg.getStatus() & 0xF0) == 0x90);
+        MidiMessage msg(MidiStatus::NoteOn, MidiChannel(channel), NoteNumber(60), Velocity(100));
+        assert(static_cast<uint8_t>(msg.getChannel()) == channel);
+        assert((msg.getStatus() & 0x0F) == channel);
+        assert((msg.getStatus() & 0xF0) == 0x90);
     }
 
-    // Test that channel values > 15 are properly masked
-    MidiMessage msg (MidiStatus::NoteOn, 20, 60, 100);
-    assert (msg.getChannel() == 4); // 20 & 0x0F = 4
+    // Test that channel values > 15 are properly masked by MidiChannel
+    MidiMessage msg(MidiStatus::NoteOn, MidiChannel(20), NoteNumber(60), Velocity(100));
+    assert(static_cast<uint8_t>(msg.getChannel()) == 4); // 20 & 0x0F = 4
 }
 
 void testMidiMessageTypeDetection()
 {
     // Note On Detection
     {
-        MidiMessage noteOn (MidiStatus::NoteOn, 0, 60, 100);
-        assert (noteOn.isNoteOn());
-        assert (!noteOn.isNoteOff());
+        MidiMessage noteOn(MidiStatus::NoteOn, MidiChannel(0), NoteNumber(60), Velocity(100));
+        assert(noteOn.isNoteOn());
+        assert(!noteOn.isNoteOff());
 
         // Note-on with velocity 0 should not be detected as note-on
-        MidiMessage noteOnZeroVel (MidiStatus::NoteOn, 0, 60, 0);
-        assert (!noteOnZeroVel.isNoteOn());
-        assert (noteOnZeroVel.isNoteOff());
+        MidiMessage noteOnZeroVel(MidiStatus::NoteOn, MidiChannel(0), NoteNumber(60), Velocity(0));
+        assert(!noteOnZeroVel.isNoteOn());
+        assert(noteOnZeroVel.isNoteOff());
     }
 
     // Note Off Detection
     {
-        MidiMessage noteOff (MidiStatus::NoteOff, 0, 60, 0);
-        assert (noteOff.isNoteOff());
-        assert (!noteOff.isNoteOn());
+        MidiMessage noteOff(MidiStatus::NoteOff, MidiChannel(0), NoteNumber(60), Velocity(0));
+        assert(noteOff.isNoteOff());
+        assert(!noteOff.isNoteOn());
 
         // Note-on with velocity 0 should be detected as note-off
-        MidiMessage noteOnZeroVel (MidiStatus::NoteOn, 0, 60, 0);
-        assert (noteOnZeroVel.isNoteOff());
+        MidiMessage noteOnZeroVel(MidiStatus::NoteOn, MidiChannel(0), NoteNumber(60), Velocity(0));
+        assert(noteOnZeroVel.isNoteOff());
     }
 
     // Control Change Detection
     {
-        MidiMessage cc (MidiStatus::ControlChange, 0, 7, 100);
-        assert (cc.isControlChange());
-        assert (!cc.isNoteOn());
-        assert (!cc.isNoteOff());
+        MidiMessage cc(MidiChannel(0), ControllerNumber(7), ControllerValue(100));
+        assert(cc.isControlChange());
+        assert(!cc.isNoteOn());
+        assert(!cc.isNoteOff());
     }
 
     // Pitch Bend Detection
     {
-        MidiMessage pb (MidiStatus::PitchBend, 0, 0, 64);
-        assert (pb.isPitchBend());
-        assert (!pb.isControlChange());
-        assert (!pb.isNoteOn());
-        assert (!pb.isNoteOff());
+        MidiMessage pb(MidiStatus::PitchBend, MidiChannel(0), 0, 64);
+        assert(pb.isPitchBend());
+        assert(!pb.isControlChange());
+        assert(!pb.isNoteOn());
+        assert(!pb.isNoteOff());
     }
 }
 
@@ -111,14 +122,19 @@ void testMidiMessageStatusByteOperations()
 
     for (const auto& tc : testCases)
     {
-        MidiMessage msg (tc.status, tc.channel, 0, 0);
-        assert (msg.getStatus() == tc.expectedStatus);
+        MidiMessage msg(tc.status, MidiChannel(tc.channel), 0, 0);
+        assert(msg.getStatus() == tc.expectedStatus);
     }
 
     // Test that status byte can be correctly decomposed into type and channel
-    MidiMessage msg (MidiStatus::NoteOn, 5, 60, 100);
-    assert ((msg.getStatus() & 0xF0) == static_cast<uint8_t> (MidiStatus::NoteOn));
-    assert ((msg.getStatus() & 0x0F) == 5);
+    MidiMessage msg(MidiStatus::NoteOn, MidiChannel(5), NoteNumber(60), Velocity(100));
+    assert((msg.getStatus() & 0xF0) == static_cast<uint8_t>(MidiStatus::NoteOn));
+    assert((msg.getStatus() & 0x0F) == 5);
+
+    // Test pack/unpack functionality
+    auto packed = msg.pack();
+    auto unpacked = MidiMessage::unpack(packed);
+    assert(unpacked == msg);
 }
 
 int main()

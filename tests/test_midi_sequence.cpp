@@ -8,92 +8,128 @@
 #include "midi/midi_sequence.h"
 #include <cassert>
 #include <iostream>
+#include <vector>
 
 using namespace PlayfulTones::DspToolBox;
 
 void testMidiSequenceBasicOperations()
 {
-    MidiSequence sequence;
+    MidiSequence64 sequence;
 
     // Test initial state
-    assert (sequence.isEmpty());
-    assert (sequence.size() == 0);
+    assert(sequence.isEmpty());
+    assert(sequence.size() == 0);
+    assert(sequence.capacity() == 1024);
 
-    // Add some messages
-    MidiMessage noteOn (MidiStatus::NoteOn, 0, 60, 100);
-    MidiMessage noteOff (MidiStatus::NoteOff, 0, 60, 0);
+    // Add some messages with strong types
+    MidiMessage noteOn(MidiStatus::NoteOn, MidiChannel(0), NoteNumber(60), Velocity(100));
+    MidiMessage noteOff(MidiStatus::NoteOff, MidiChannel(0), NoteNumber(60), Velocity(0));
 
-    sequence.addMessage (100, noteOn);
-    assert (sequence.size() == 1);
-    assert (!sequence.isEmpty());
+    assert(sequence.addMessage(Timestamp<uint64_t>(100), noteOn));
+    assert(sequence.size() == 1);
+    assert(!sequence.isEmpty());
 
-    sequence.addMessage (200, noteOff);
-    assert (sequence.size() == 2);
+    assert(sequence.addMessage(Timestamp<uint64_t>(200), noteOff));
+    assert(sequence.size() == 2);
 
     // Test clear
     sequence.clear();
-    assert (sequence.isEmpty());
-    assert (sequence.size() == 0);
+    assert(sequence.isEmpty());
+    assert(sequence.size() == 0);
 }
 
 void testMidiSequenceTimeOrdering()
 {
-    MidiSequence sequence;
+    MidiSequence64 sequence;
 
-    // Add messages in non-chronological order
-    MidiMessage msg1 (MidiStatus::NoteOn, 0, 60, 100);
-    MidiMessage msg2 (MidiStatus::NoteOff, 0, 60, 0);
-    MidiMessage msg3 (MidiStatus::ControlChange, 0, 7, 100);
+    // Add messages in non-chronological order with strong types
+    MidiMessage msg1(MidiStatus::NoteOn, MidiChannel(0), NoteNumber(60), Velocity(100));
+    MidiMessage msg2(MidiStatus::NoteOff, MidiChannel(0), NoteNumber(60), Velocity(0));
+    MidiMessage msg3(MidiChannel(0), ControllerNumber(7), ControllerValue(100));
 
-    sequence.addMessage (300, msg3);
-    sequence.addMessage (100, msg1);
-    sequence.addMessage (200, msg2);
+    assert(sequence.addMessage(Timestamp<uint64_t>(300), msg3));
+    assert(sequence.addMessage(Timestamp<uint64_t>(100), msg1));
+    assert(sequence.addMessage(Timestamp<uint64_t>(200), msg2));
 
     // Verify messages are sorted by timestamp
-    const auto& messages = sequence.getAllMessages();
-    assert (messages[0].timestamp == 100);
-    assert (messages[1].timestamp == 200);
-    assert (messages[2].timestamp == 300);
-    markUsed (messages);
+    const auto messages = sequence.getAllMessages();
+    assert(static_cast<uint64_t>(messages[0].timestamp) == 100);
+    assert(static_cast<uint64_t>(messages[1].timestamp) == 200);
+    assert(static_cast<uint64_t>(messages[2].timestamp) == 300);
+    markUsed(messages);
 }
 
 void testMidiSequenceTimeRangeQueries()
 {
-    MidiSequence sequence;
+    MidiSequence64 sequence;
 
-    MidiMessage msg1 (MidiStatus::NoteOn, 0, 60, 100);
-    MidiMessage msg2 (MidiStatus::NoteOff, 0, 60, 0);
-    MidiMessage msg3 (MidiStatus::ControlChange, 0, 7, 100);
-    MidiMessage msg4 (MidiStatus::PitchBend, 0, 0, 64);
+    MidiMessage msg1(MidiStatus::NoteOn, MidiChannel(0), NoteNumber(60), Velocity(100));
+    MidiMessage msg2(MidiStatus::NoteOff, MidiChannel(0), NoteNumber(60), Velocity(0));
+    MidiMessage msg3(MidiChannel(0), ControllerNumber(7), ControllerValue(100));
+    MidiMessage msg4(MidiStatus::PitchBend, MidiChannel(0), 0, 64);
 
-    sequence.addMessage (100, msg1);
-    sequence.addMessage (200, msg2);
-    sequence.addMessage (300, msg3);
-    sequence.addMessage (400, msg4);
+    assert(sequence.addMessage(Timestamp<uint64_t>(100), msg1));
+    assert(sequence.addMessage(Timestamp<uint64_t>(200), msg2));
+    assert(sequence.addMessage(Timestamp<uint64_t>(300), msg3));
+    assert(sequence.addMessage(Timestamp<uint64_t>(400), msg4));
 
-    // Test getMessagesUpTo
-    auto upTo250 = sequence.getMessagesUpTo (250);
-    assert (upTo250.size() == 2);
-    assert (upTo250[0].isNoteOn());
-    assert (upTo250[1].isNoteOff());
+    // Test processMessagesUpTo (real-time safe)
+    std::vector<MidiMessage> upTo250;
+    sequence.processMessagesUpTo(Timestamp<uint64_t>(250), [&](const MidiMessage& msg) {
+        upTo250.push_back(msg);
+    });
+    assert(upTo250.size() == 2);
+    assert(upTo250[0].isNoteOn());
+    assert(upTo250[1].isNoteOff());
 
-    // Test getMessagesBetween
-    auto between150And350 = sequence.getMessagesBetween (150, 350);
-    assert (between150And350.size() == 2);
-    assert (between150And350[0].isNoteOff());
-    assert (between150And350[1].isControlChange());
+    // Test processMessagesBetween (real-time safe)
+    std::vector<MidiMessage> between150And350;
+    sequence.processMessagesBetween(Timestamp<uint64_t>(150), Timestamp<uint64_t>(350), 
+                                  [&](const MidiMessage& msg) {
+        between150And350.push_back(msg);
+    });
+    assert(between150And350.size() == 2);
+    assert(between150And350[0].isNoteOff());
+    assert(between150And350[1].isControlChange());
 
     // Test getNextMessage
-    const auto* nextMsg = sequence.getNextMessage (250);
-    assert (nextMsg != nullptr);
-    assert (nextMsg->timestamp == 300);
-    assert (nextMsg->message.isControlChange());
-    markUsed (nextMsg);
+    const auto* nextMsg = sequence.getNextMessage(Timestamp<uint64_t>(250));
+    assert(nextMsg != nullptr);
+    assert(static_cast<uint64_t>(nextMsg->timestamp) == 300);
+    assert(nextMsg->message.isControlChange());
+    markUsed(nextMsg);
 
     // Test getNextMessage at end
-    const auto* noNext = sequence.getNextMessage (400);
-    assert (noNext == nullptr);
-    markUsed (noNext);
+    const auto* noNext = sequence.getNextMessage(Timestamp<uint64_t>(400));
+    assert(noNext == nullptr);
+    markUsed(noNext);
+}
+
+void testMidiSequenceCapacityAndRemoval()
+{
+    // Test with small capacity
+    MidiSequence<uint64_t, 3> smallSequence;
+    
+    MidiMessage msg1(MidiStatus::NoteOn, MidiChannel(0), NoteNumber(60), Velocity(100));
+    MidiMessage msg2(MidiStatus::NoteOff, MidiChannel(0), NoteNumber(60), Velocity(0));
+    MidiMessage msg3(MidiChannel(0), ControllerNumber(7), ControllerValue(100));
+    MidiMessage msg4(MidiStatus::PitchBend, MidiChannel(0), 0, 64);
+
+    // Fill to capacity
+    assert(smallSequence.addMessage(Timestamp<uint64_t>(100), msg1));
+    assert(smallSequence.addMessage(Timestamp<uint64_t>(200), msg2));
+    assert(smallSequence.addMessage(Timestamp<uint64_t>(300), msg3));
+    assert(smallSequence.isFull());
+    
+    // Should fail to add when full
+    assert(!smallSequence.addMessage(Timestamp<uint64_t>(400), msg4));
+    assert(smallSequence.size() == 3);
+
+    // Test removeMessagesOlderThan
+    auto removed = smallSequence.removeMessagesOlderThan(Timestamp<uint64_t>(250));
+    assert(removed == 2);
+    assert(smallSequence.size() == 1);
+    assert(static_cast<uint64_t>(smallSequence[0].timestamp) == 300);
 }
 
 int main()
@@ -108,6 +144,9 @@ int main()
 
         testMidiSequenceTimeRangeQueries();
         std::cout << "MidiSequence Time Range Queries: PASSED" << std::endl;
+
+        testMidiSequenceCapacityAndRemoval();
+        std::cout << "MidiSequence Capacity and Removal: PASSED" << std::endl;
 
         return 0;
     } catch (const std::exception& e)
