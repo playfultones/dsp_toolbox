@@ -18,7 +18,7 @@ namespace PlayfulTones::DspToolBox
      * @param args The unused parameters.
      */
     template <typename... Args>
-    void markUsed (Args&&...)
+    constexpr void markUsed (Args&&...) noexcept
     {
     }
 } // namespace PlayfulTones::DspToolBox
