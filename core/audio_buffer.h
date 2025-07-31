@@ -1,129 +1,235 @@
-/*******************************************************************
-* Copyright         : 2025 Playful Tones
-* Author            : Bence Kovács
-* License           : GNU General Public License v3.0
+/*******************************************************************                                                                                                                
+* Copyright         : 2025 Playful Tones                                                                                                                                            
+* Author            : Bence Kovács                                                                                                                                                  
+* License           : GNU General Public License v3.0                                                                                                                               
 *******************************************************************/
 
 #pragma once
-#include "buffer_view.h"
 #include <algorithm>
-#include <stdexcept>
-#include <vector>
+#include <array>
+#include <concepts>
+#include <cstring>
+#include <span>
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    #include <immintrin.h>
+#endif
 
 namespace PlayfulTones::DspToolBox
 {
-    /**
-     * @brief A class for handling multi-channel audio buffer data.
-     * 
-     * This class provides a safe and efficient way to store and manipulate
-     * multi-channel audio data. It handles memory management automatically
-     * and provides bounds checking in debug builds.
+    /**                                                                                                                                                                             
+     * @brief High-performance audio buffer utilities for compile-time sized buffers                                                                                                
+     *                                                                                                                                                                              
+     * This provides utilities for working with the compile-time sized audio buffers                                                                                                
+     * used in the ProcessorBase class. All operations are cache-efficient and                                                                                                      
+     * designed for real-time audio processing.                                                                                                                                     
      */
-    class AudioBuffer
+
+    /**                                                                                                                                                                             
+     * @brief Compile-time audio buffer storage with proper alignment                                                                                                               
+     * @tparam SampleType The sample type (float, double)                                                                                                                           
+     * @tparam BlockSize Fixed block size (compile-time constant)                                                                                                                   
+     * @tparam NumChannels Number of audio channels (compile-time constant)                                                                                                         
+     */
+    template <typename SampleType, size_t BlockSize, size_t NumChannels>
+    class alignas (32) AudioBufferStorage
     {
     public:
-        /**
-         * @brief Construct an empty audio buffer
-         */
-        AudioBuffer() = default;
+        using sample_type = SampleType;
+        using ChannelBuffer = std::span<sample_type, BlockSize>;
+        using AudioBuffer = std::array<ChannelBuffer, NumChannels>;
 
-        /**
-         * @brief Construct an audio buffer with specified dimensions
-         * @param numChannels The number of audio channels
-         * @param numFrames The number of frames per channel
+        static constexpr size_t block_size = BlockSize;
+        static constexpr size_t num_channels = NumChannels;
+
+        /**                                                                                                                                                                         
+         * @brief Constructor - initializes all samples to zero                                                                                                                     
          */
-        AudioBuffer (int numChannels, int numFrames)
+        constexpr AudioBufferStorage() noexcept : data_ {}
         {
-            resize (numChannels, numFrames);
-        }
-
-        /**
-         * @brief Resize the audio buffer
-         * @param newNumChannels New number of channels
-         * @param newNumFrames New number of frames per channel
-         * @throws std::invalid_argument if dimensions are invalid
-         */
-        void resize (int newNumChannels, int newNumFrames)
-        {
-            if (newNumChannels <= 0 || newNumFrames <= 0)
-                throw std::invalid_argument ("Buffer dimensions must be positive");
-
-            data.resize (newNumChannels);
-            channelPointers.resize (newNumChannels);
-
-            for (int ch = 0; ch < newNumChannels; ++ch)
+            // Initialize spans to point to our data
+            for (size_t ch = 0; ch < NumChannels; ++ch)
             {
-                data[ch].resize (newNumFrames, 0.0f);
-                channelPointers[ch] = data[ch].data();
+                spans_[ch] = ChannelBuffer { data_[ch].data(), BlockSize };
             }
-
-            view.setData (channelPointers.data(), newNumChannels, newNumFrames);
         }
 
-        /**
-         * @brief Clear the buffer contents (set all samples to 0)
+        /**                                                                                                                                                                         
+         * @brief Get the audio buffer for processing                                                                                                                               
+         * @return AudioBuffer reference ready for processing                                                                                                                       
          */
-        void clear()
+        constexpr AudioBuffer& getBuffer() noexcept
         {
-            for (auto& channel : data)
-                std::fill (channel.begin(), channel.end(), 0.0f);
+            return spans_;
         }
 
-        /**
-         * @brief Get the number of channels
-         * @return Number of channels
+        /**                                                                                                                                                                         
+         * @brief Get the audio buffer for processing (const version)                                                                                                               
+         * @return Const AudioBuffer reference                                                                                                                                      
          */
-        int getNumChannels() const { return view.getNumChannels(); }
-
-        /**
-         * @brief Get the number of frames per channel
-         * @return Number of frames per channel
-         */
-        int getNumFrames() const { return view.getNumFrames(); }
-
-        /**
-         * @brief Get write access to sample data for a channel
-         * @param channel Channel index
-         * @return Pointer to the channel's sample data
-         * @throws std::out_of_range if channel index is invalid
-         */
-        float* getChannelPointer (int channel)
+        constexpr const AudioBuffer& getBuffer() const noexcept
         {
-            return view.getChannelPointer (channel);
+            return spans_;
         }
 
-        /**
-         * @brief Get read-only access to sample data for a channel
-         * @param channel Channel index
-         * @return Const pointer to the channel's sample data
-         * @throws std::out_of_range if channel index is invalid
+        /**                                                                                                                                                                         
+         * @brief Clear all channels to zero                                                                                                                                        
          */
-        const float* getChannelPointer (int channel) const
+        void clear() noexcept
         {
-            return view.getChannelPointer (channel);
+            for (auto& channel : data_)
+            {
+                std::fill (channel.begin(), channel.end(), sample_type { 0 });
+            }
         }
 
-        /**
-         * @brief Get raw pointer array for use with processing functions
-         * @return Pointer to array of channel pointers
+        /**                                                                                                                                                                         
+         * @brief Get access to a specific channel's data                                                                                                                           
+         * @param channel Channel index                                                                                                                                             
+         * @return Span to the channel's data                                                                                                                                       
          */
-        float** getArrayOfChannels()
+        constexpr ChannelBuffer getChannel (size_t channel) noexcept
         {
-            return view.getArrayOfChannels();
+            return spans_[channel];
         }
 
-        /**
-         * @brief Get const raw pointer array for use with processing functions
-         * @return Const pointer to array of channel pointers
+        /**                                                                                                                                                                         
+         * @brief Get const access to a specific channel's data                                                                                                                     
+         * @param channel Channel index                                                                                                                                             
+         * @return Const span to the channel's data                                                                                                                                 
          */
-        float* const* getArrayOfChannels() const
+        constexpr ChannelBuffer getChannel (size_t channel) const noexcept
         {
-            return view.getArrayOfChannels();
+            return spans_[channel];
         }
 
     private:
-        std::vector<std::vector<float>> data;
-        std::vector<float*> channelPointers; // Cache of data pointers for efficient access
-        BufferView view;
+        // Aligned storage for maximum cache efficiency
+        alignas (32) std::array<std::array<sample_type, BlockSize>, NumChannels> data_;
+        AudioBuffer spans_;
     };
+
+    /**                                                                                                                                                                             
+     * @brief High-performance buffer operations                                                                                                                                    
+     */
+    namespace BufferOps
+    {
+        /**                                                                                                                                                                         
+         * @brief Clear all channels in an audio buffer                                                                                                                             
+         * @tparam AudioBuffer The audio buffer type                                                                                                                                
+         * @param buffer The buffer to clear                                                                                                                                        
+         */
+        template <typename AudioBuffer>
+        void clear (AudioBuffer& buffer) noexcept
+        {
+            for (auto& channel : buffer)
+            {
+                std::fill (channel.begin(), channel.end(), typename AudioBuffer::value_type::value_type { 0 });
+            }
+        }
+
+        /**                                                                                                                                                                         
+         * @brief Copy data from one buffer to another                                                                                                                              
+         * @tparam AudioBuffer The audio buffer type                                                                                                                                
+         * @param source Source buffer                                                                                                                                              
+         * @param destination Destination buffer                                                                                                                                    
+         */
+        template <typename AudioBuffer>
+        void copy (const AudioBuffer& source, AudioBuffer& destination) noexcept
+        {
+            for (size_t ch = 0; ch < source.size(); ++ch)
+            {
+                std::copy (source[ch].begin(), source[ch].end(), destination[ch].begin());
+            }
+        }
+
+        /**                                                                                                                                                                         
+         * @brief Add one buffer to another (mix)                                                                                                                                   
+         * @tparam AudioBuffer The audio buffer type                                                                                                                                
+         * @param source Source buffer to add                                                                                                                                       
+         * @param destination Destination buffer (modified)                                                                                                                         
+         */
+        template <typename AudioBuffer>
+        void add (const AudioBuffer& source, AudioBuffer& destination) noexcept
+        {
+            for (size_t ch = 0; ch < source.size(); ++ch)
+            {
+                for (size_t i = 0; i < source[ch].size(); ++i)
+                {
+                    destination[ch][i] += source[ch][i];
+                }
+            }
+        }
+
+        /**                                                                                                                                                                         
+         * @brief Multiply buffer by a gain factor                                                                                                                                  
+         * @tparam AudioBuffer The audio buffer type                                                                                                                                
+         * @tparam GainType The gain type                                                                                                                                           
+         * @param buffer Buffer to modify                                                                                                                                           
+         * @param gain Gain factor to apply                                                                                                                                         
+         */
+        template <typename AudioBuffer, typename GainType>
+        void multiply (AudioBuffer& buffer, GainType gain) noexcept
+        {
+            for (auto& channel : buffer)
+            {
+                for (auto& sample : channel)
+                {
+                    sample *= gain;
+                }
+            }
+        }
+
+        /**                                                                                                                                                                         
+         * @brief SIMD-optimized buffer clearing (when available)                                                                                                                   
+         * @tparam AudioBuffer The audio buffer type                                                                                                                                
+         * @param buffer Buffer to clear                                                                                                                                            
+         */
+        template <typename AudioBuffer>
+        void clear_simd (AudioBuffer& buffer) noexcept
+        {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+            if constexpr (std::is_same_v<typename AudioBuffer::value_type::value_type, float>)
+            {
+                const __m256 zero = _mm256_setzero_ps();
+
+                for (auto& channel : buffer)
+                {
+                    float* data = channel.data();
+                    const size_t simd_size = channel.size() & ~7; // Round down to multiple of 8
+
+                    // Use unaligned stores for safety - compiler will optimize if aligned
+                    for (size_t i = 0; i < simd_size; i += 8)
+                    {
+                        _mm256_storeu_ps (&data[i], zero);
+                    }
+
+                    // Handle remaining samples
+                    for (size_t i = simd_size; i < channel.size(); ++i)
+                    {
+                        data[i] = 0.0f;
+                    }
+                }
+                return;
+            }
+#endif
+
+            // Fallback to standard clear
+            clear (buffer);
+        }
+    }
+
+    /**                                                                                                                                                                             
+     * @brief Concept to validate audio buffer types                                                                                                                                
+     */
+    template <typename T>
+    concept AudioBufferType = requires (T buffer) {
+        typename T::value_type; // Should be a channel buffer type
+        typename T::value_type::value_type; // Should have a sample type
+        { buffer.size() } -> std::convertible_to<size_t>;
+        { buffer[0] } -> std::convertible_to<typename T::value_type>;
+        requires std::contiguous_iterator<decltype (buffer[0].begin())>;
+        requires std::sized_range<typename T::value_type>;
+    };
+
 } // namespace PlayfulTones::DspToolBox
