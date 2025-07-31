@@ -130,20 +130,20 @@ void testConstruction()
 {
     std::cout << "Testing construction...\n";
 
-    // Default construction
-    RingBuffer<float> buffer1;
-    assert (buffer1.getCapacity() == RingBuffer<float>::DefaultCapacity);
+    // Default construction with compile-time capacity
+    RingBuffer<float, 1024> buffer1;
+    assert (buffer1.getCapacity() == 1024);
     assert (buffer1.getSize() == 0);
     assert (buffer1.isEmpty());
     assert (!buffer1.isFull());
 
     // Custom capacity
-    RingBuffer<int> buffer2 (100);
-    assert (buffer2.getCapacity() == 128); // Next power of 2
+    RingBuffer<int, 128> buffer2;
+    assert (buffer2.getCapacity() == 128);
     assert (buffer2.getSize() == 0);
 
-    // Power of 2 capacity
-    RingBuffer<double> buffer3 (256);
+    // Different capacity
+    RingBuffer<double, 256> buffer3;
     assert (buffer3.getCapacity() == 256);
     assert (buffer3.getSize() == 0);
 
@@ -154,7 +154,7 @@ void testPushPop()
 {
     std::cout << "Testing push/pop operations...\n";
 
-    RingBuffer<int> buffer (8);
+    RingBuffer<int, 8> buffer;
 
     // Test push
     for (int i = 0; i < 8; ++i)
@@ -196,7 +196,7 @@ void testPeek()
 {
     std::cout << "Testing peek operation...\n";
 
-    RingBuffer<int> buffer (4);
+    RingBuffer<int, 4> buffer;
 
     // Test peek on empty buffer
     int value;
@@ -232,7 +232,7 @@ void testClear()
 {
     std::cout << "Testing clear operation...\n";
 
-    RingBuffer<int> buffer (4);
+    RingBuffer<int, 4> buffer;
 
     // Add some elements
     markUsed (buffer.push (10));
@@ -255,11 +255,11 @@ void testClear()
     std::cout << "Clear tests passed!\n";
 }
 
-void testResize()
+void testCapacityConstraints()
 {
-    std::cout << "Testing resize operation...\n";
+    std::cout << "Testing capacity constraints...\n";
 
-    RingBuffer<int> buffer (4);
+    RingBuffer<int, 4> buffer;
 
     // Add some elements
     markUsed (buffer.push (10));
@@ -269,12 +269,7 @@ void testResize()
     assert (buffer.getSize() == 3);
     assert (buffer.getCapacity() == 4);
 
-    // Resize to larger capacity
-    assert (buffer.resize (8));
-    assert (buffer.getCapacity() == 8);
-    assert (buffer.getSize() == 3);
-
-    // Check elements are preserved
+    // Check elements are correct
     int value;
     assert (buffer.pop (value));
     assert (value == 10);
@@ -284,28 +279,24 @@ void testResize()
     assert (value == 30);
     markUsed (value);
 
-    // Fill the buffer
-    for (int i = 0; i < 8; ++i)
+    // Fill the buffer to capacity
+    for (int i = 0; i < 4; ++i)
     {
         markUsed (buffer.push (i));
     }
 
     assert (buffer.isFull());
+    assert (buffer.getCapacity() == 4);
+    assert (buffer.getSize() == 4);
 
-    // Resize to smaller capacity (still large enough for current elements)
-    assert (buffer.resize (8));
-    assert (buffer.getCapacity() == 8);
-    assert (buffer.getSize() == 8);
-    assert (buffer.isFull());
-
-    std::cout << "Resize tests passed!\n";
+    std::cout << "Capacity constraint tests passed!\n";
 }
 
 void testWraparound()
 {
     std::cout << "Testing wraparound behavior...\n";
 
-    RingBuffer<int> buffer (4);
+    RingBuffer<int, 4> buffer;
 
     // Fill the buffer
     for (int i = 0; i < 4; ++i)
@@ -339,7 +330,7 @@ void testBulkOperations()
 {
     std::cout << "Testing bulk operations...\n";
 
-    RingBuffer<int> buffer (16);
+    RingBuffer<int, 16> buffer;
 
     // Test writeMany
     std::vector<int> input = { 1, 2, 3, 4, 5, 6, 7, 8 };
@@ -388,25 +379,21 @@ void testBulkOperations()
     std::cout << "Bulk operations tests passed!\n";
 }
 
-// Define types for testing properties
-template <typename T>
-using NoAllocRingBuffer = RingBuffer<T, detail::NoAllocVector<T>>;
-template <typename T>
-using CountingRingBuffer = RingBuffer<T, detail::CountingVector<T>>;
+// Define types for testing properties with fixed capacity
+template <typename T, size_t Capacity = 64>
+using NoAllocRingBuffer = RingBuffer<T, Capacity>;
+template <typename T, size_t Capacity = 64>
+using CountingRingBuffer = RingBuffer<T, Capacity>;
 
-// This function checks method signatures but doesn't actually instantiate objects
-// that would trigger allocations
+// This function checks method signatures with compile-time capacity
 template <typename T>
 void testNoAllocationInCriticalMethods()
 {
-    // We don't actually create a buffer, as that would trigger allocation
-    // Instead, we just verify the method signatures using decltype/declval
-
     // Define a dummy array for method signatures that need it
     T arr[4];
 
     // Use declval to get references to objects without constructing them
-    using Buffer = NoAllocRingBuffer<T>;
+    using Buffer = NoAllocRingBuffer<T, 64>;
 
     // Check signatures of critical methods using decltype and declval
     using PushMethod = decltype (std::declval<Buffer&>().push (std::declval<const T&>()));
@@ -427,10 +414,10 @@ void testRuntimeAllocationTracking()
 {
     std::cout << "Testing runtime allocation tracking...\n";
 
-    // Create a buffer with allocation tracking
-    CountingRingBuffer<int> buffer (64);
+    // Create a buffer with compile-time capacity (no allocation)
+    CountingRingBuffer<int, 64> buffer;
 
-    // Reset counters after initial construction
+    // Reset counters after initial construction (should be 0 anyway)
     detail::CountingAllocator<int>::resetCounters();
 
     // Push should not allocate
@@ -479,18 +466,18 @@ void testCompileTimeProperties()
     testNoAllocationInCriticalMethods<std::pair<int, float>>();
 
     // Ensure push operation is non-allocating and noexcept
-    auto testPush = [buffer = RingBuffer<int> (16), value = 42]() mutable noexcept {
+    auto testPush = [buffer = RingBuffer<int, 16>{}, value = 42]() mutable noexcept {
         return buffer.push (value);
     };
     static_assert (detail::NonAllocating<decltype (testPush)>);
 
     // Ensure pop operation is non-allocating and noexcept
-    auto testPop = [buffer = RingBuffer<int> (16), value = 0]() mutable noexcept {
+    auto testPop = [buffer = RingBuffer<int, 16>{}, value = 0]() mutable noexcept {
         return markUsed (buffer.pop (value));
     };
     static_assert (detail::NonAllocating<decltype (testPop)>);
     // Ensure peek operation is non-allocating and noexcept
-    auto testPeek = [buffer = RingBuffer<int> (16), value = 0]() mutable noexcept {
+    auto testPeek = [buffer = RingBuffer<int, 16>{}, value = 0]() mutable noexcept {
         return buffer.peek (value);
     };
     static_assert (detail::NonAllocating<decltype (testPeek)>);
@@ -502,7 +489,7 @@ void testMultithreading()
 {
     std::cout << "Testing multithreading behavior...\n";
 
-    RingBuffer<int> buffer (1024);
+    RingBuffer<int, 1024> buffer;
     const int numItems = 10000;
     std::atomic<bool> producerDone (false);
     std::atomic<int> consumedItems (0);
@@ -555,7 +542,7 @@ int main()
         testPushPop();
         testPeek();
         testClear();
-        testResize();
+        testCapacityConstraints();
         testWraparound();
         testBulkOperations();
         testMultithreading();

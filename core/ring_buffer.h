@@ -9,7 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <type_traits>
-#include <vector>
+#include <array>
 #include <cstddef>
 
 namespace PlayfulTones::DspToolBox
@@ -18,75 +18,31 @@ namespace PlayfulTones::DspToolBox
      * @brief A lock-free ring buffer (FIFO queue) for audio processing
      * 
      * This implementation is designed for single-producer, single-consumer scenarios.
-     * It's lock-free and allocation-free during normal operation (push/pop).
+     * It's lock-free and allocation-free with compile-time fixed capacity.
      * All critical audio path methods are marked noexcept for real-time safety.
      * 
      * @tparam T The type of elements stored in the ring buffer
-     * @tparam Container The container type used for storage (default: std::vector<T>)
+     * @tparam Capacity The compile-time fixed capacity of the ring buffer
      */
-    template <typename T, typename Container = std::vector<T>>
+    template <typename T, size_t Capacity>
     class alignas(64) RingBuffer  // Cache-line aligned class
     {
     public:
-        static constexpr size_t DefaultCapacity = 1024; // Default initial capacity
-
+        static_assert(Capacity > 0, "RingBuffer capacity must be greater than 0");
+        
         // Verify that our atomic operations are lock-free
         static_assert (std::atomic<size_t>::is_always_lock_free,
             "std::atomic<size_t> must be lock-free for this implementation");
         /**
-         * @brief Construct a new Ring Buffer with the given capacity
+         * @brief Construct a new Ring Buffer with compile-time fixed capacity
          * 
-         * @param initialCapacity The initial capacity of the ring buffer
+         * No dynamic allocation occurs during construction.
          */
-        explicit RingBuffer (size_t initialCapacity = DefaultCapacity)
-            : data_ (initialCapacity), capacity_ (initialCapacity), readIndex_ (0), writeIndex_ (0)
+        constexpr RingBuffer() noexcept
+            : data_{}, readIndex_(0), writeIndex_(0)
         {
-            // Ensure the capacity is a power of 2 for efficient wrapping
-            if (!isPowerOfTwo (initialCapacity))
-            {
-                capacity_ = nextPowerOfTwo (initialCapacity);
-                data_.resize (capacity_);
-            }
         }
 
-        /**
-         * @brief Resize the ring buffer to a new capacity
-         * 
-         * This method will allocate new memory. It's not thread-safe and should
-         * not be called while push/pop operations are in progress.
-         * 
-         * @param newCapacity The new capacity for the ring buffer
-         * @return true if resize was successful, false otherwise
-         */
-        bool resize (size_t newCapacity)
-        {
-            if (newCapacity == 0)
-                return false;
-
-            // Make sure the new capacity is a power of 2
-            if (!isPowerOfTwo (newCapacity))
-                newCapacity = nextPowerOfTwo (newCapacity);
-
-            // Create new storage
-            Container newData (newCapacity);
-
-            // Copy existing elements if any
-            const size_t size = getSize();
-            for (size_t i = 0; i < size; ++i)
-            {
-                const size_t readPos = (readIndex_.load (std::memory_order_relaxed) + i) & (capacity_ - 1);
-                const size_t writePos = i & (newCapacity - 1);
-                newData[writePos] = std::move (data_[readPos]);
-            }
-
-            // Update internal state
-            data_ = std::move (newData);
-            capacity_ = newCapacity;
-            readIndex_.store (0, std::memory_order_relaxed);
-            writeIndex_.store (size, std::memory_order_relaxed);
-
-            return true;
-        }
 
         /**
          * @brief Clear the ring buffer, removing all elements
@@ -116,9 +72,9 @@ namespace PlayfulTones::DspToolBox
          * 
          * @return size_t The capacity
          */
-        [[nodiscard]] constexpr size_t getCapacity() const noexcept
+        [[nodiscard]] static constexpr size_t getCapacity() noexcept
         {
-            return capacity_;
+            return Capacity;
         }
 
         /**
@@ -138,7 +94,7 @@ namespace PlayfulTones::DspToolBox
          */
         [[nodiscard]] constexpr bool isFull() const noexcept
         {
-            return getSize() == capacity_;
+            return getSize() == Capacity;
         }
 
         /**
@@ -156,11 +112,11 @@ namespace PlayfulTones::DspToolBox
             const auto currentRead = readIndex_.load (std::memory_order_acquire);
 
             // Check if there is space - branch prediction friendly
-            if (currentWrite - currentRead >= capacity_) [[unlikely]]
+            if (currentWrite - currentRead >= Capacity) [[unlikely]]
                 return false;
 
             // Write the element
-            const auto writePos = currentWrite & (capacity_ - 1);
+            const auto writePos = currentWrite % Capacity;
             data_[writePos] = value;
 
             // Update write index with release semantics to ensure visibility
@@ -183,11 +139,11 @@ namespace PlayfulTones::DspToolBox
             const auto currentRead = readIndex_.load (std::memory_order_acquire);
 
             // Check if there is space - branch prediction friendly
-            if (currentWrite - currentRead >= capacity_) [[unlikely]]
+            if (currentWrite - currentRead >= Capacity) [[unlikely]]
                 return false;
 
             // Write the element
-            const auto writePos = currentWrite & (capacity_ - 1);
+            const auto writePos = currentWrite % Capacity;
             data_[writePos] = std::move (value);
 
             // Update write index with release semantics to ensure visibility
@@ -214,7 +170,7 @@ namespace PlayfulTones::DspToolBox
                 return false;
 
             // Read the element
-            const auto readPos = currentRead & (capacity_ - 1);
+            const auto readPos = currentRead % Capacity;
             value = std::move (data_[readPos]);
 
             // Update read index with release semantics to ensure visibility
@@ -241,7 +197,7 @@ namespace PlayfulTones::DspToolBox
                 return false;
 
             // Read the element without removing it
-            const auto readPos = currentRead & (capacity_ - 1);
+            const auto readPos = currentRead % Capacity;
             value = data_[readPos];
             return true;
         }
@@ -266,7 +222,7 @@ namespace PlayfulTones::DspToolBox
                 return false;
 
             // Calculate the actual position to read from
-            const auto readPos = (currentRead + offset) & (capacity_ - 1);
+            const auto readPos = (currentRead + offset) % Capacity;
             value = data_[readPos];
             return true;
         }
@@ -308,12 +264,12 @@ namespace PlayfulTones::DspToolBox
             const auto currentRead = readIndex_.load (std::memory_order_acquire);
 
             // Calculate available space
-            const auto available = capacity_ - (currentWrite - currentRead);
+            const auto available = Capacity - (currentWrite - currentRead);
             const auto toWrite = std::min (count, available);
 
             for (size_t i = 0; i < toWrite; ++i)
             {
-                const auto pos = (currentWrite + i) & (capacity_ - 1);
+                const auto pos = (currentWrite + i) % Capacity;
                 data_[pos] = data[i];
             }
 
@@ -343,7 +299,7 @@ namespace PlayfulTones::DspToolBox
 
             for (size_t i = 0; i < toRead; ++i)
             {
-                const auto pos = (currentRead + i) & (capacity_ - 1);
+                const auto pos = (currentRead + i) % Capacity;
                 data[i] = std::move (data_[pos]);
             }
 
@@ -354,27 +310,7 @@ namespace PlayfulTones::DspToolBox
         }
 
     private:
-        // Helper functions for power-of-two calculations
-        static constexpr bool isPowerOfTwo (size_t x) noexcept
-        {
-            return x > 0 && (x & (x - 1)) == 0;
-        }
-
-        static constexpr size_t nextPowerOfTwo (size_t x) noexcept
-        {
-            --x;
-            x |= x >> 1;
-            x |= x >> 2;
-            x |= x >> 4;
-            x |= x >> 8;
-            x |= x >> 16;
-            if constexpr (sizeof (size_t) == 8)
-                x |= x >> 32;
-            return x + 1;
-        }
-
-        Container data_; // Storage for ring buffer elements
-        size_t capacity_; // Current capacity (always a power of 2)
+        std::array<T, Capacity> data_; // Fixed-size storage for ring buffer elements
         
         // Cache-line aligned atomic indices to prevent false sharing
         alignas(64) std::atomic<size_t> readIndex_; // Current read position

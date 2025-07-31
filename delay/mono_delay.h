@@ -50,29 +50,19 @@ namespace PlayfulTones::DspToolBox
          */
         Delay(sample_type initialDelayMs = sample_type{500}, 
               sample_type initialFeedback = sample_type{0.5}, 
-              sample_type initialMix = sample_type{0.5})
+              sample_type initialMix = sample_type{0.5}) noexcept
         {
             // Clamp initial values to valid ranges and store atomically
             delayMs_.store(std::clamp(initialDelayMs, sample_type{0}, MaxDelayTimeMs), std::memory_order_relaxed);
             feedback_.store(std::clamp(initialFeedback, sample_type{0}, sample_type{1}), std::memory_order_relaxed);
             mix_.store(std::clamp(initialMix, sample_type{0}, sample_type{1}), std::memory_order_relaxed);
-            
-            // Initialize delay buffers for each channel
-            for (size_t ch = 0; ch < NumChannels; ++ch)
-            {
-                delayBuffers_[ch] = RingBuffer<sample_type>(1); // Will be resized in prepare()
-            }
         }
 
         void prepare_impl() noexcept
         {
-            // Calculate the maximum number of samples needed for 2 seconds of delay
-            constexpr size_t maxDelaySamples = static_cast<size_t>(std::ceil(2.0 * Base::sample_rate)) + 1;
-
-            // Resize and clear all delay buffers
+            // Clear all delay buffers (capacity is fixed at compile-time)
             for (size_t ch = 0; ch < NumChannels; ++ch)
             {
-                delayBuffers_[ch].resize(maxDelaySamples);
                 delayBuffers_[ch].clear();
             }
 
@@ -230,8 +220,9 @@ namespace PlayfulTones::DspToolBox
         std::atomic<sample_type> mix_{sample_type{0.5}}; // Dry/wet mix (0.0 = dry, 1.0 = wet)
         std::atomic<size_t> delaySamples_{0}; // Delay time in samples
 
-        // Per-channel delay buffers
-        std::array<RingBuffer<sample_type>, NumChannels> delayBuffers_;
+        // Per-channel delay buffers with compile-time capacity
+        static constexpr size_t kMaxDelaySamples = static_cast<size_t>(2.0 * SampleRate) + 1;
+        std::array<RingBuffer<sample_type, kMaxDelaySamples>, NumChannels> delayBuffers_;
     };
     
     // Common type aliases
