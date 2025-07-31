@@ -6,14 +6,18 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <type_traits>
-#include <array>
-#include <cstddef>
 
 namespace PlayfulTones::DspToolBox
 {
+#ifdef _MSC_VER
+    #pragma warning(push)
+    #pragma warning(disable : 4324) // Suppress structure padding warning
+#endif
     /**
      * @brief A lock-free ring buffer (FIFO queue) for audio processing
      * 
@@ -25,11 +29,11 @@ namespace PlayfulTones::DspToolBox
      * @tparam Capacity The compile-time fixed capacity of the ring buffer
      */
     template <typename T, size_t Capacity>
-    class alignas(64) RingBuffer  // Cache-line aligned class
+    class alignas (64) RingBuffer // Cache-line aligned class
     {
     public:
-        static_assert(Capacity > 0, "RingBuffer capacity must be greater than 0");
-        
+        static_assert (Capacity > 0, "RingBuffer capacity must be greater than 0");
+
         // Verify that our atomic operations are lock-free
         static_assert (std::atomic<size_t>::is_always_lock_free,
             "std::atomic<size_t> must be lock-free for this implementation");
@@ -39,10 +43,9 @@ namespace PlayfulTones::DspToolBox
          * No dynamic allocation occurs during construction.
          */
         constexpr RingBuffer() noexcept
-            : data_{}, readIndex_(0), writeIndex_(0)
+            : data_ {}, readIndex_ (0), writeIndex_ (0)
         {
         }
-
 
         /**
          * @brief Clear the ring buffer, removing all elements
@@ -311,9 +314,14 @@ namespace PlayfulTones::DspToolBox
 
     private:
         std::array<T, Capacity> data_; // Fixed-size storage for ring buffer elements
-        
+
         // Cache-line aligned atomic indices to prevent false sharing
-        alignas(64) std::atomic<size_t> readIndex_; // Current read position
-        alignas(64) std::atomic<size_t> writeIndex_; // Current write position
+        alignas (64) std::atomic<size_t> readIndex_; // Current read position
+        alignas (64) std::atomic<size_t> writeIndex_; // Current write position
     };
+
+#ifdef _MSC_VER
+    #pragma warning(push)
+    #pragma warning(disable : 4324) // Suppress structure padding warning
+#endif
 }
