@@ -6,6 +6,7 @@
 
 #pragma once
 #include "../core/constants.h"
+#include "../helpers/compilationhelpers.h"
 #include "../processors/processor.h"
 #include <algorithm>
 #include <atomic>
