@@ -61,7 +61,7 @@ namespace PlayfulTones::DspToolBox
     /**
      * Represents a MIDI message with strong type safety and real-time optimizations.
      */
-    class alignas (8) MidiMessage // Align to 8 bytes for optimal cache performance
+    class MidiMessage
     {
     public:
         // Default constructor - creates a "null" MIDI message
@@ -160,9 +160,8 @@ namespace PlayfulTones::DspToolBox
         uint8_t m_status; // Status byte (includes channel for channel messages)
         uint8_t m_data1; // First data byte
         uint8_t m_data2; // Second data byte (not used in all message types)
-        [[maybe_unused]] uint8_t m_padding; // Padding for 8-byte alignment
     };
 
-    static_assert (sizeof (MidiMessage) == 8, "MidiMessage should be 8 bytes with 8-byte alignment for optimal cache performance");
+    static_assert (sizeof (MidiMessage) <= 4, "MidiMessage should be compact for optimal cache performance");
 
 } // namespace PlayfulTones::DspToolBox
