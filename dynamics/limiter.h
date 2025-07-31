@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <span>
 
 namespace PlayfulTones::DspToolBox
 {
@@ -41,6 +42,7 @@ namespace PlayfulTones::DspToolBox
 
         static constexpr sample_type kNoReduction = sample_type { 1 };
         static constexpr sample_type kSmallValue = sample_type { 1e-6 };
+        static constexpr sample_type kDenormalOffset = sample_type { 1e-25 };
 
         /**
          * @brief Construct a new Limiter processor
@@ -69,23 +71,30 @@ namespace PlayfulTones::DspToolBox
 
             const sample_type ceiling = ceiling_.load (std::memory_order_relaxed);
 
-            // Process each channel
+            // Process each channel with memory-safe access
             for (size_t ch = 0; ch < numChannels; ++ch)
             {
-                sample_type* channelData = buffer[ch].data();
+                std::span<sample_type> channelSpan { buffer[ch].data(), numFrames };
 
-                // Process samples with branch prediction hints
+                // Process samples in blocks to aid vectorization
+                // Most compilers can auto-vectorize this pattern
                 for (size_t i = 0; i < numFrames; ++i)
                 {
-                    const sample_type sample = channelData[i];
+                    sample_type sample = channelSpan[i];
+                    
+                    // Add small offset to prevent denormals
+                    sample += (sample > 0 ? kDenormalOffset : -kDenormalOffset);
+                    
                     const sample_type absValue = std::abs (sample);
 
                     // Branch prediction: most samples don't need limiting
                     if (absValue > ceiling) [[unlikely]]
                     {
                         const sample_type gainReduction = ceiling / (absValue + kSmallValue);
-                        channelData[i] = sample * gainReduction;
+                        sample *= gainReduction;
                     }
+                    
+                    channelSpan[i] = sample;
                 }
             }
         }
@@ -97,11 +106,13 @@ namespace PlayfulTones::DspToolBox
 
         /**
          * @brief Set the limiter ceiling (thread-safe)
-         * @param newCeiling The new ceiling value
+         * @param newCeiling The new ceiling value (must be positive)
          */
         void setCeiling (sample_type newCeiling) noexcept
         {
-            ceiling_.store (std::max (kSmallValue, newCeiling), std::memory_order_relaxed);
+            // Ensure ceiling is positive and above minimum threshold
+            const sample_type clampedCeiling = std::clamp(newCeiling, kSmallValue, sample_type{10});
+            ceiling_.store (clampedCeiling, std::memory_order_relaxed);
         }
 
         /**
