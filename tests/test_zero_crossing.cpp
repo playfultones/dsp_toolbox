@@ -108,7 +108,7 @@ void testMultiChannelZeroCrossing()
     const size_t crossings = ZeroCrossingAnalyzer::countZeroCrossings (buffer);
     constexpr size_t expectedCrossings = 6; // Total should be 6
 
-    markUsed (crossings);
+    markUsed (crossings, expectedCrossings);
     assert (crossings == expectedCrossings && "Multi-channel zero crossing test failed");
 }
 
