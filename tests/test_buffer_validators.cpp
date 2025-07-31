@@ -26,6 +26,7 @@ void testBasicBufferValidation()
 
     auto& bufferA = storageA.getBuffer();
     auto& bufferB = storageB.getBuffer();
+    markUsed (bufferA);
 
     // Test valid case
     assert (validateBufferDimensions (bufferA, bufferB) && "Should validate matching AudioBuffers");
