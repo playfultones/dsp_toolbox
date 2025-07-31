@@ -10,6 +10,7 @@
 #include <concepts>
 #include <cstring>
 #include <span>
+#include <utility>
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
     #include <immintrin.h>
@@ -45,14 +46,24 @@ namespace PlayfulTones::DspToolBox
         /**                                                                                                                                                                         
          * @brief Constructor - initializes all samples to zero                                                                                                                     
          */
-        constexpr AudioBufferStorage() noexcept : data_ {}
+        constexpr AudioBufferStorage() noexcept : data_ {}, spans_ { createSpans() }
         {
-            // Initialize spans to point to our data
-            for (size_t ch = 0; ch < NumChannels; ++ch)
-            {
-                spans_[ch] = ChannelBuffer { data_[ch].data(), BlockSize };
-            }
         }
+
+    private:
+        // Helper function to initialize spans using index sequence
+        template<size_t... Is>
+        constexpr AudioBuffer createSpansImpl(std::index_sequence<Is...>) noexcept
+        {
+            return AudioBuffer{ChannelBuffer{data_[Is].data(), BlockSize}...};
+        }
+        
+        constexpr AudioBuffer createSpans() noexcept
+        {
+            return createSpansImpl(std::make_index_sequence<NumChannels>{});
+        }
+
+    public:
 
         /**                                                                                                                                                                         
          * @brief Get the audio buffer for processing                                                                                                                               
@@ -229,7 +240,7 @@ namespace PlayfulTones::DspToolBox
         { buffer.size() } -> std::convertible_to<size_t>;
         { buffer[0] } -> std::convertible_to<typename T::value_type>;
         requires std::contiguous_iterator<decltype (buffer[0].begin())>;
-        requires std::sized_range<typename T::value_type>;
+        requires std::ranges::sized_range<typename T::value_type>;
     };
 
 } // namespace PlayfulTones::DspToolBox

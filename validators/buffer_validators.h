@@ -8,60 +8,81 @@
 #include "../core/audio_buffer.h"
 #include <cmath>
 #include <iostream>
-#include <vector>
+#include <type_traits>
 
 namespace PlayfulTones::DspToolBox
 {
     /**
-     * Validates that two audio buffers have valid dimensions.
+     * @brief Validates that two audio buffers have valid and matching dimensions.
      * 
+     * @tparam AudioBufferA Must satisfy AudioBufferType concept
+     * @tparam AudioBufferB Must satisfy AudioBufferType concept
      * @param bufferA First buffer to validate
      * @param bufferB Second buffer to validate 
      * @return true if buffer dimensions are valid and match, false otherwise
      */
-    inline bool validateBufferDimensions (const AudioBuffer& bufferA, const AudioBuffer& bufferB)
+    template <AudioBufferType AudioBufferA, AudioBufferType AudioBufferB>
+    constexpr bool validateBufferDimensions(const AudioBufferA& bufferA, const AudioBufferB& bufferB) noexcept
     {
-        return bufferA.getNumChannels() > 0
-               && bufferA.getNumFrames() > 0
-               && bufferA.getNumChannels() == bufferB.getNumChannels()
-               && bufferA.getNumFrames() == bufferB.getNumFrames();
+        // Check that both buffers have channels and that dimensions match
+        return bufferA.size() > 0 && 
+               bufferA.size() == bufferB.size() &&
+               (bufferA.size() == 0 || bufferA[0].size() > 0) &&
+               (bufferA.size() == 0 || bufferA[0].size() == bufferB[0].size());
     }
 
     /**
-     * Compare two audio buffers for equality within a specified threshold.
+     * @brief Compare two audio buffers for equality within a specified threshold.
      * 
+     * Uses compile-time optimization and follows real-time safety principles.
+     * 
+     * @tparam AudioBufferA Must satisfy AudioBufferType concept
+     * @tparam AudioBufferB Must satisfy AudioBufferType concept
+     * @tparam SampleType The sample type for threshold comparison
      * @param bufferA First buffer to compare
      * @param bufferB Second buffer to compare
-     * @param threshold Maximum allowed difference between samples (default: 0.000001f)
+     * @param threshold Maximum allowed difference between samples
      * @param printMismatches Whether to print details about mismatches (default: true)
      * @return true if buffers match within threshold, false otherwise
      */
-    inline bool compareAudioBuffers (const AudioBuffer& bufferA,
-        const AudioBuffer& bufferB,
-        float threshold = 0.000001f,
-        bool printMismatches = true)
+    template <AudioBufferType AudioBufferA, AudioBufferType AudioBufferB, typename SampleType = float>
+    [[nodiscard]] bool compareAudioBuffers(const AudioBufferA& bufferA,
+                                          const AudioBufferB& bufferB,
+                                          SampleType threshold = SampleType{0.000001},
+                                          bool printMismatches = true)
     {
         // First validate buffer dimensions
-        if (!validateBufferDimensions (bufferA, bufferB))
-            return false;
-
-        const auto numChannels = bufferA.getNumChannels();
-        const auto numFrames = bufferA.getNumFrames();
-
-        for (int ch = 0; ch < numChannels; ++ch)
+        if (!validateBufferDimensions(bufferA, bufferB))
         {
-            const auto* channelA = bufferA.getChannelPointer (ch);
-            const auto* channelB = bufferB.getChannelPointer (ch);
-
-            for (int i = 0; i < numFrames; ++i)
+            if (printMismatches)
             {
-                if (std::abs (channelA[i] - channelB[i]) > threshold)
+                std::cout << "Buffer dimension mismatch: BufferA channels=" << bufferA.size()
+                          << ", BufferB channels=" << bufferB.size() << std::endl;
+            }
+            return false;
+        }
+
+        const size_t numChannels = bufferA.size();
+        
+        for (size_t ch = 0; ch < numChannels; ++ch)
+        {
+            const auto& channelA = bufferA[ch];
+            const auto& channelB = bufferB[ch];
+            
+            const size_t numFrames = channelA.size();
+
+            for (size_t i = 0; i < numFrames; ++i)
+            {
+                const auto diff = std::abs(static_cast<SampleType>(channelA[i]) - static_cast<SampleType>(channelB[i]));
+                
+                if (diff > threshold)
                 {
                     if (printMismatches)
                     {
                         std::cout << "Mismatch at channel " << ch << ", frame " << i
                                   << ". Expected: " << channelB[i]
-                                  << ", Got: " << channelA[i] << std::endl;
+                                  << ", Got: " << channelA[i] 
+                                  << ", Diff: " << diff << std::endl;
                     }
                     return false;
                 }
@@ -70,53 +91,95 @@ namespace PlayfulTones::DspToolBox
         return true;
     }
 
-    // Keep the raw pointer versions for backward compatibility
-    inline bool validateBufferDimensions (float* const* bufferA,
-        float* const* bufferB,
-        int numChannels,
-        int numFrames)
+    /**
+     * @brief Fast buffer comparison optimized for exact matches.
+     * 
+     * Uses std::equal for potentially better optimization than manual loops.
+     * 
+     * @tparam AudioBufferA Must satisfy AudioBufferType concept
+     * @tparam AudioBufferB Must satisfy AudioBufferType concept
+     * @param bufferA First buffer to compare
+     * @param bufferB Second buffer to compare
+     * @return true if buffers are exactly equal, false otherwise
+     */
+    template <AudioBufferType AudioBufferA, AudioBufferType AudioBufferB>
+    [[nodiscard]] constexpr bool compareAudioBuffersExact(const AudioBufferA& bufferA,
+                                                          const AudioBufferB& bufferB) noexcept
     {
-        // Check for null pointers and valid dimensions
-        if (!bufferA || !bufferB || numChannels <= 0 || numFrames <= 0)
+        if (!validateBufferDimensions(bufferA, bufferB))
             return false;
 
-        // Validate channel pointers
-        for (int ch = 0; ch < numChannels; ++ch)
+        const size_t numChannels = bufferA.size();
+        
+        for (size_t ch = 0; ch < numChannels; ++ch)
         {
-            if (!bufferA[ch] || !bufferB[ch])
+            if (!std::equal(bufferA[ch].begin(), bufferA[ch].end(), bufferB[ch].begin()))
                 return false;
         }
-
+        
         return true;
     }
 
-    inline bool compareAudioBuffers (float* const* bufferA,
-        float* const* bufferB,
-        int numChannels,
-        int numFrames,
-        float threshold = 0.000001f,
-        bool printMismatches = true)
+    /**
+     * @brief Validate a single buffer has valid dimensions.
+     * 
+     * @tparam AudioBuffer Must satisfy AudioBufferType concept
+     * @param buffer Buffer to validate
+     * @return true if buffer has valid dimensions, false otherwise
+     */
+    template <AudioBufferType AudioBuffer>
+    constexpr bool validateSingleBuffer(const AudioBuffer& buffer) noexcept
     {
-        // First validate buffer pointers
-        if (!validateBufferDimensions (bufferA, bufferB, numChannels, numFrames))
-            return false;
+        return buffer.size() > 0 && (buffer.size() == 0 || buffer[0].size() > 0);
+    }
 
-        for (int ch = 0; ch < numChannels; ++ch)
+    /**
+     * @brief Check if buffer contains any NaN or infinite values.
+     * 
+     * Critical for debugging audio processing chains.
+     * 
+     * @tparam AudioBuffer Must satisfy AudioBufferType concept
+     * @param buffer Buffer to check
+     * @param printDetails Whether to print details about invalid values
+     * @return true if buffer contains valid finite values, false otherwise
+     */
+    template <AudioBufferType AudioBuffer>
+    [[nodiscard]] bool validateFiniteValues(const AudioBuffer& buffer, bool printDetails = true)
+    {
+        using SampleType = typename AudioBuffer::value_type::value_type;
+        
+        if constexpr (std::is_floating_point_v<SampleType>)
         {
-            for (int i = 0; i < numFrames; ++i)
+            const size_t numChannels = buffer.size();
+            
+            for (size_t ch = 0; ch < numChannels; ++ch)
             {
-                if (std::abs (bufferA[ch][i] - bufferB[ch][i]) > threshold)
+                const auto& channel = buffer[ch];
+                const size_t numFrames = channel.size();
+                
+                for (size_t i = 0; i < numFrames; ++i)
                 {
-                    if (printMismatches)
+                    const SampleType sample = channel[i];
+                    
+                    if (!std::isfinite(sample))
                     {
-                        std::cout << "Mismatch at channel " << ch << ", frame " << i
-                                  << ". Expected: " << bufferB[ch][i]
-                                  << ", Got: " << bufferA[ch][i] << std::endl;
+                        if (printDetails)
+                        {
+                            std::cout << "Invalid value at channel " << ch << ", frame " << i
+                                      << ". Value: " << sample;
+                            if (std::isnan(sample))
+                                std::cout << " (NaN)";
+                            else if (std::isinf(sample))
+                                std::cout << " (Infinite)";
+                            std::cout << std::endl;
+                        }
+                        return false;
                     }
-                    return false;
                 }
             }
         }
+        
         return true;
     }
+
 } // namespace PlayfulTones::DspToolBox
