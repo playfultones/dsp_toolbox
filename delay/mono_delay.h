@@ -95,7 +95,10 @@ namespace PlayfulTones::DspToolBox
             for (size_t ch = 0; ch < numChannels; ++ch)
             {
                 auto& delayBuffer = delayBuffers_[ch];
-                sample_type* channelData = buffer[ch].data();
+                sample_type* channelData = buffer.getChannelPointer(ch);
+                
+                // Add small DC offset to prevent denormals (branchless)
+                constexpr sample_type kDenormalOffset = sample_type{1e-30};
                 
                 for (size_t i = 0; i < numFrames; ++i)
                 {
@@ -105,18 +108,14 @@ namespace PlayfulTones::DspToolBox
                     // Read the delayed sample
                     delayBuffer.peekAt(delaySample, currentDelaySamples);
 
-                    // Prevent denormals in delay sample
-                    constexpr sample_type kDenormalEpsilon = sample_type{1e-30};
-                    if (std::abs(delaySample) < kDenormalEpsilon)
-                        delaySample = sample_type{0};
+                    // Branchless denormal prevention using DC offset
+                    delaySample += kDenormalOffset;
 
                     // Calculate the output sample with dry/wet mix (branchless)
                     channelData[i] = dryGain * inputSample + wetGain * delaySample;
 
-                    // Calculate feedback sample with denormal protection
-                    sample_type feedbackSample = inputSample + currentFeedback * delaySample;
-                    if (std::abs(feedbackSample) < kDenormalEpsilon)
-                        feedbackSample = sample_type{0};
+                    // Calculate feedback sample with denormal protection (branchless)
+                    sample_type feedbackSample = inputSample + currentFeedback * delaySample + kDenormalOffset;
 
                     // Discard the oldest sample if the buffer is full
                     if (delayBuffer.isFull()) [[unlikely]]
