@@ -204,8 +204,8 @@ void testPeek()
     markUsed (value);
 
     // Add some elements
-    buffer.push (10);
-    buffer.push (20);
+    markUsed (buffer.push (10));
+    markUsed (buffer.push (20));
 
     // Peek should return the first element without removing it
     assert (buffer.peek (value));
@@ -235,9 +235,9 @@ void testClear()
     RingBuffer<int> buffer (4);
 
     // Add some elements
-    buffer.push (10);
-    buffer.push (20);
-    buffer.push (30);
+    markUsed (buffer.push (10));
+    markUsed (buffer.push (20));
+    markUsed (buffer.push (30));
 
     assert (buffer.getSize() == 3);
 
@@ -262,9 +262,9 @@ void testResize()
     RingBuffer<int> buffer (4);
 
     // Add some elements
-    buffer.push (10);
-    buffer.push (20);
-    buffer.push (30);
+    markUsed (buffer.push (10));
+    markUsed (buffer.push (20));
+    markUsed (buffer.push (30));
 
     assert (buffer.getSize() == 3);
     assert (buffer.getCapacity() == 4);
@@ -287,7 +287,7 @@ void testResize()
     // Fill the buffer
     for (int i = 0; i < 8; ++i)
     {
-        buffer.push (i);
+        markUsed (buffer.push (i));
     }
 
     assert (buffer.isFull());
@@ -310,26 +310,26 @@ void testWraparound()
     // Fill the buffer
     for (int i = 0; i < 4; ++i)
     {
-        buffer.push (i);
+        markUsed (buffer.push (i));
     }
 
     // Remove 2 elements
     int value;
-    buffer.pop (value);
-    buffer.pop (value);
+    markUsed (buffer.pop (value));
+    markUsed (buffer.pop (value));
 
     // Add 2 more elements (should wrap around)
-    buffer.push (100);
-    buffer.push (101);
+    markUsed (buffer.push (100));
+    markUsed (buffer.push (101));
 
     // Check elements in order
-    buffer.pop (value);
+    markUsed (buffer.pop (value));
     assert (value == 2);
-    buffer.pop (value);
+    markUsed (buffer.pop (value));
     assert (value == 3);
-    buffer.pop (value);
+    markUsed (buffer.pop (value));
     assert (value == 100);
-    buffer.pop (value);
+    markUsed (buffer.pop (value));
     assert (value == 101);
 
     std::cout << "Wraparound tests passed!\n";
@@ -368,7 +368,7 @@ void testBulkOperations()
     markUsed (discarded);
 
     // Read remaining elements
-    buffer.readMany (output.data(), 2);
+    markUsed (buffer.readMany (output.data(), 2));
     assert (output[0] == 7);
     assert (output[1] == 8);
 
@@ -435,30 +435,30 @@ void testRuntimeAllocationTracking()
 
     // Push should not allocate
     int testValue = 42;
-    buffer.push (testValue);
+    markUsed (buffer.push (testValue));
     assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
 
     // Pop should not allocate
     int outValue;
-    buffer.pop (outValue);
+    markUsed (buffer.pop (outValue));
     assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
 
     // Fill buffer
     for (int i = 0; i < 64; i++)
     {
-        buffer.push (i);
+        markUsed (buffer.push (i));
     }
 
     // Bulk operations should not allocate
     int values[10];
-    buffer.readMany (values, 10);
+    markUsed (buffer.readMany (values, 10));
     assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
 
-    buffer.writeMany (values, 10);
+    markUsed (buffer.writeMany (values, 10));
     assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
 
     // Peek should not allocate
-    buffer.peek (outValue);
+    markUsed (buffer.peek (outValue));
     assert (detail::CountingAllocator<int>::getAllocationCount() == 0);
 
     std::cout << "Runtime allocation tracking tests passed!\n";
@@ -486,7 +486,7 @@ void testCompileTimeProperties()
 
     // Ensure pop operation is non-allocating and noexcept
     auto testPop = [buffer = RingBuffer<int> (16), value = 0]() mutable noexcept {
-        return buffer.pop (value);
+        return markUsed (buffer.pop (value));
     };
     static_assert (detail::NonAllocating<decltype (testPop)>);
     // Ensure peek operation is non-allocating and noexcept

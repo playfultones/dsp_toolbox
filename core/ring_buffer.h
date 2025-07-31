@@ -10,6 +10,7 @@
 #include <memory>
 #include <type_traits>
 #include <vector>
+#include <cstddef>
 
 namespace PlayfulTones::DspToolBox
 {
@@ -18,12 +19,13 @@ namespace PlayfulTones::DspToolBox
      * 
      * This implementation is designed for single-producer, single-consumer scenarios.
      * It's lock-free and allocation-free during normal operation (push/pop).
+     * All critical audio path methods are marked noexcept for real-time safety.
      * 
      * @tparam T The type of elements stored in the ring buffer
      * @tparam Container The container type used for storage (default: std::vector<T>)
      */
     template <typename T, typename Container = std::vector<T>>
-    class RingBuffer
+    class alignas(64) RingBuffer  // Cache-line aligned class
     {
     public:
         static constexpr size_t DefaultCapacity = 1024; // Default initial capacity
@@ -88,8 +90,10 @@ namespace PlayfulTones::DspToolBox
 
         /**
          * @brief Clear the ring buffer, removing all elements
+         * 
+         * Marked noexcept for real-time safety requirements.
          */
-        void clear()
+        void clear() noexcept
         {
             readIndex_.store (0, std::memory_order_relaxed);
             writeIndex_.store (0, std::memory_order_relaxed);
@@ -100,7 +104,7 @@ namespace PlayfulTones::DspToolBox
          * 
          * @return size_t The number of elements
          */
-        size_t getSize() const
+        [[nodiscard]] constexpr size_t getSize() const noexcept
         {
             const auto read = readIndex_.load (std::memory_order_relaxed);
             const auto write = writeIndex_.load (std::memory_order_relaxed);
@@ -112,7 +116,7 @@ namespace PlayfulTones::DspToolBox
          * 
          * @return size_t The capacity
          */
-        size_t getCapacity() const
+        [[nodiscard]] constexpr size_t getCapacity() const noexcept
         {
             return capacity_;
         }
@@ -122,7 +126,7 @@ namespace PlayfulTones::DspToolBox
          * 
          * @return true if empty, false otherwise
          */
-        bool isEmpty() const
+        [[nodiscard]] constexpr bool isEmpty() const noexcept
         {
             return getSize() == 0;
         }
@@ -132,7 +136,7 @@ namespace PlayfulTones::DspToolBox
          * 
          * @return true if full, false otherwise
          */
-        bool isFull() const
+        [[nodiscard]] constexpr bool isFull() const noexcept
         {
             return getSize() == capacity_;
         }
@@ -141,17 +145,18 @@ namespace PlayfulTones::DspToolBox
          * @brief Push a new element into the ring buffer
          * 
          * This method is guaranteed to be allocation-free and lock-free.
+         * Marked noexcept for real-time safety requirements.
          * 
          * @param value The value to push
          * @return true if push was successful, false if buffer is full
          */
-        bool push (const T& value)
+        [[nodiscard]] bool push (const T& value) noexcept
         {
             const auto currentWrite = writeIndex_.load (std::memory_order_relaxed);
             const auto currentRead = readIndex_.load (std::memory_order_acquire);
 
-            // Check if there is space
-            if (currentWrite - currentRead >= capacity_)
+            // Check if there is space - branch prediction friendly
+            if (currentWrite - currentRead >= capacity_) [[unlikely]]
                 return false;
 
             // Write the element
@@ -167,17 +172,18 @@ namespace PlayfulTones::DspToolBox
          * @brief Push a new element using move semantics
          * 
          * This method is guaranteed to be allocation-free and lock-free.
+         * Marked noexcept for real-time safety requirements.
          * 
          * @param value The value to push (will be moved from)
          * @return true if push was successful, false if buffer is full
          */
-        bool push (T&& value)
+        [[nodiscard]] bool push (T&& value) noexcept
         {
             const auto currentWrite = writeIndex_.load (std::memory_order_relaxed);
             const auto currentRead = readIndex_.load (std::memory_order_acquire);
 
-            // Check if there is space
-            if (currentWrite - currentRead >= capacity_)
+            // Check if there is space - branch prediction friendly
+            if (currentWrite - currentRead >= capacity_) [[unlikely]]
                 return false;
 
             // Write the element
@@ -193,17 +199,18 @@ namespace PlayfulTones::DspToolBox
          * @brief Pop an element from the ring buffer
          * 
          * This method is guaranteed to be allocation-free and lock-free.
+         * Marked noexcept for real-time safety requirements.
          * 
          * @param[out] value Reference to store the popped value
          * @return true if pop was successful, false if buffer is empty
          */
-        bool pop (T& value)
+        [[nodiscard]] bool pop (T& value) noexcept
         {
             const auto currentRead = readIndex_.load (std::memory_order_relaxed);
             const auto currentWrite = writeIndex_.load (std::memory_order_acquire);
 
-            // Check if there are elements to read
-            if (currentRead == currentWrite)
+            // Check if there are elements to read - branch prediction friendly
+            if (currentRead == currentWrite) [[unlikely]]
                 return false;
 
             // Read the element
@@ -219,17 +226,18 @@ namespace PlayfulTones::DspToolBox
          * @brief Peek at the next element without removing it
          * 
          * This method is guaranteed to be allocation-free and lock-free.
+         * Marked noexcept for real-time safety requirements.
          * 
          * @param[out] value Reference to store the peeked value
          * @return true if peek was successful, false if buffer is empty
          */
-        bool peek (T& value) const
+        [[nodiscard]] bool peek (T& value) const noexcept
         {
             const auto currentRead = readIndex_.load (std::memory_order_relaxed);
             const auto currentWrite = writeIndex_.load (std::memory_order_acquire);
 
-            // Check if there are elements to read
-            if (currentRead == currentWrite)
+            // Check if there are elements to read - branch prediction friendly
+            if (currentRead == currentWrite) [[unlikely]]
                 return false;
 
             // Read the element without removing it
@@ -242,23 +250,23 @@ namespace PlayfulTones::DspToolBox
          * @brief Peek at an element at a specific offset from the read position
          * 
          * This method is guaranteed to be allocation-free and lock-free.
+         * Marked noexcept for real-time safety requirements.
          * 
          * @param[out] value Reference to store the peeked value
          * @param offset The offset from the current read position
          * @return true if peek was successful, false if the position is invalid
          */
-        bool peekAt (T& value, size_t offset) const
+        [[nodiscard]] bool peekAt (T& value, size_t offset) const noexcept
         {
             const auto currentRead = readIndex_.load (std::memory_order_relaxed);
             const auto currentWrite = writeIndex_.load (std::memory_order_acquire);
 
-            // Calculate the actual position to read from
-            const auto readPos = (currentRead + offset) & (capacity_ - 1);
-            
-            // Check if the position is within valid range
-            if (offset >= (currentWrite - currentRead))
+            // Check if the position is within valid range - branch prediction friendly
+            if (offset >= (currentWrite - currentRead)) [[unlikely]]
                 return false;
 
+            // Calculate the actual position to read from
+            const auto readPos = (currentRead + offset) & (capacity_ - 1);
             value = data_[readPos];
             return true;
         }
@@ -266,10 +274,12 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Discard a number of elements from the front of the buffer
          * 
+         * Marked noexcept for real-time safety requirements.
+         * 
          * @param count Number of elements to discard
          * @return size_t The actual number of elements discarded
          */
-        size_t discard (size_t count)
+        [[nodiscard]] size_t discard (size_t count) noexcept
         {
             const auto currentRead = readIndex_.load (std::memory_order_relaxed);
             const auto currentWrite = writeIndex_.load (std::memory_order_acquire);
@@ -277,7 +287,7 @@ namespace PlayfulTones::DspToolBox
             const auto available = currentWrite - currentRead;
             const auto toDiscard = std::min (count, available);
 
-            if (toDiscard > 0)
+            if (toDiscard > 0) [[likely]]
                 readIndex_.store (currentRead + toDiscard, std::memory_order_release);
 
             return toDiscard;
@@ -286,11 +296,13 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Write multiple elements to the buffer
          * 
+         * Marked noexcept for real-time safety requirements.
+         * 
          * @param data Pointer to the data to write
          * @param count Number of elements to write
          * @return size_t The number of elements actually written
          */
-        size_t writeMany (const T* data, size_t count)
+        [[nodiscard]] size_t writeMany (const T* data, size_t count) noexcept
         {
             const auto currentWrite = writeIndex_.load (std::memory_order_relaxed);
             const auto currentRead = readIndex_.load (std::memory_order_acquire);
@@ -305,7 +317,7 @@ namespace PlayfulTones::DspToolBox
                 data_[pos] = data[i];
             }
 
-            if (toWrite > 0)
+            if (toWrite > 0) [[likely]]
                 writeIndex_.store (currentWrite + toWrite, std::memory_order_release);
 
             return toWrite;
@@ -314,11 +326,13 @@ namespace PlayfulTones::DspToolBox
         /**
          * @brief Read multiple elements from the buffer
          * 
+         * Marked noexcept for real-time safety requirements.
+         * 
          * @param data Pointer to the destination buffer
          * @param count Maximum number of elements to read
          * @return size_t The number of elements actually read
          */
-        size_t readMany (T* data, size_t count)
+        [[nodiscard]] size_t readMany (T* data, size_t count) noexcept
         {
             const auto currentRead = readIndex_.load (std::memory_order_relaxed);
             const auto currentWrite = writeIndex_.load (std::memory_order_acquire);
@@ -333,7 +347,7 @@ namespace PlayfulTones::DspToolBox
                 data[i] = std::move (data_[pos]);
             }
 
-            if (toRead > 0)
+            if (toRead > 0) [[likely]]
                 readIndex_.store (currentRead + toRead, std::memory_order_release);
 
             return toRead;
@@ -341,12 +355,12 @@ namespace PlayfulTones::DspToolBox
 
     private:
         // Helper functions for power-of-two calculations
-        static bool isPowerOfTwo (size_t x)
+        static constexpr bool isPowerOfTwo (size_t x) noexcept
         {
             return x > 0 && (x & (x - 1)) == 0;
         }
 
-        static size_t nextPowerOfTwo (size_t x)
+        static constexpr size_t nextPowerOfTwo (size_t x) noexcept
         {
             --x;
             x |= x >> 1;
@@ -361,7 +375,9 @@ namespace PlayfulTones::DspToolBox
 
         Container data_; // Storage for ring buffer elements
         size_t capacity_; // Current capacity (always a power of 2)
-        std::atomic<size_t> readIndex_; // Current read position
-        std::atomic<size_t> writeIndex_; // Current write position
+        
+        // Cache-line aligned atomic indices to prevent false sharing
+        alignas(64) std::atomic<size_t> readIndex_; // Current read position
+        alignas(64) std::atomic<size_t> writeIndex_; // Current write position
     };
 }
