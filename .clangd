@@ -1,0 +1,8 @@
+CompileFlags:
+  Add:
+    - "-std=c++23"
+    - "-xc++"
+  CompilationDatabase: build/debug
+
+Diagnostics:
+  UnusedIncludes: Strict
