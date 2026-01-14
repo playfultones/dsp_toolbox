@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-01-14
+
+### Changed
+
+- **ConstexprGraph**: Added pre-indexed connection handling for improved processing performance. Connection lookups are now O(1) per node instead of O(C) where C is total connections.
+
 ## [0.1.0] - 2026-01-14
 
 Initial development release of the DSP Toolbox - a header-only C++23 library providing high-performance, validated DSP building blocks for real-time audio applications.

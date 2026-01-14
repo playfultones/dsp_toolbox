@@ -23,10 +23,6 @@
 namespace PlayfulTones::DspToolbox::Graph
 {
 
-    //----------------------------------------------------------------------
-    // Connection - Explicit channel routing
-    //----------------------------------------------------------------------
-
     /**
      * @brief Explicit connection between node channels.
      *
@@ -60,10 +56,6 @@ namespace PlayfulTones::DspToolbox::Graph
         std::size_t destChannel; ///< Channel within dest node (0-based)
     };
 
-    //----------------------------------------------------------------------
-    // ChannelMapping - External to internal channel routing
-    //----------------------------------------------------------------------
-
     /**
      * @brief Maps an external channel to an internal node channel.
      *
@@ -85,10 +77,6 @@ namespace PlayfulTones::DspToolbox::Graph
         std::size_t internalNode; ///< Node index within the graph
         std::size_t internalChannel; ///< Channel within that node's slice
     };
-
-    //----------------------------------------------------------------------
-    // ExternalIOLike - Concept for graph external interface
-    //----------------------------------------------------------------------
 
     /**
      * @brief Concept for types that define a graph's external interface.
@@ -122,10 +110,6 @@ namespace PlayfulTones::DspToolbox::Graph
         { T::outputMappings };
     };
 
-    //----------------------------------------------------------------------
-    // Node - Simple node wrapper (ID only)
-    //----------------------------------------------------------------------
-
     /**
      * @brief Simple node wrapper with ID only.
      *
@@ -145,10 +129,6 @@ namespace PlayfulTones::DspToolbox::Graph
         constexpr Node() = default;
         constexpr explicit Node (Processor p) : processor (std::move (p)) {}
     };
-
-    //----------------------------------------------------------------------
-    // ConstexprGraph - Zero-overhead static graph
-    //----------------------------------------------------------------------
 
     namespace Detail
     {
@@ -224,6 +204,47 @@ namespace PlayfulTones::DspToolbox::Graph
             return false; // stateless processors can share
         }
 
+        // Count connections targeting a specific node (for pre-indexed lookup)
+        template <auto Connections, std::size_t DestNode>
+        constexpr std::size_t countConnectionsToNode()
+        {
+            std::size_t count = 0;
+            for (std::size_t i = 0; i < Connections.size(); ++i)
+            {
+                if (Connections[i].destNode == DestNode)
+                    ++count;
+            }
+            return count;
+        }
+
+        // Build array of connection indices for a specific destination node
+        template <auto Connections, std::size_t DestNode>
+        constexpr auto getConnectionIndicesForNode()
+        {
+            constexpr std::size_t count = countConnectionsToNode<Connections, DestNode>();
+            std::array<std::size_t, count> indices {};
+            std::size_t idx = 0;
+            for (std::size_t i = 0; i < Connections.size(); ++i)
+            {
+                if (Connections[i].destNode == DestNode)
+                    indices[idx++] = i;
+            }
+            return indices;
+        }
+
+        // Generate lookup table: tuple of arrays, one per node
+        template <auto Connections, std::size_t... NodeIndices>
+        constexpr auto makeConnectionLookupImpl (std::index_sequence<NodeIndices...>)
+        {
+            return std::make_tuple (getConnectionIndicesForNode<Connections, NodeIndices>()...);
+        }
+
+        template <auto Connections, std::size_t NumNodes>
+        constexpr auto makeConnectionLookup()
+        {
+            return makeConnectionLookupImpl<Connections> (std::make_index_sequence<NumNodes> {});
+        }
+
     } // namespace Detail
 
     /**
@@ -279,9 +300,8 @@ namespace PlayfulTones::DspToolbox::Graph
         /** @brief Maximum channels for any single node */
         static constexpr std::size_t MaxNodeChannels = Detail::MaxNodeChannelsImpl<Nodes...>::value;
 
-        //------------------------------------------------------------------
-        // Construction
-        //------------------------------------------------------------------
+        /** @brief Pre-computed lookup: for each node, which connection indices target it */
+        static constexpr auto ConnectionLookup = Detail::makeConnectionLookup<Connections, NumNodes>();
 
         constexpr ConstexprGraph() = default;
 
@@ -289,10 +309,6 @@ namespace PlayfulTones::DspToolbox::Graph
             : nodes_ (std::move (nodes)...)
         {
         }
-
-        //------------------------------------------------------------------
-        // Node access
-        //------------------------------------------------------------------
 
         template <std::size_t Index>
         [[nodiscard]] constexpr auto& getNode() noexcept
@@ -324,10 +340,6 @@ namespace PlayfulTones::DspToolbox::Graph
             return Detail::ChannelOffsetHelper<std::tuple<Nodes...>, Index>::compute();
         }
 
-        //------------------------------------------------------------------
-        // Processing
-        //------------------------------------------------------------------
-
         template <typename SampleType>
         constexpr void process (BufferView<SampleType>& buffer, std::size_t sampleCount) noexcept
         {
@@ -340,10 +352,6 @@ namespace PlayfulTones::DspToolbox::Graph
             process (buffer, buffer.getNumSamples());
         }
 
-        //------------------------------------------------------------------
-        // Reset
-        //------------------------------------------------------------------
-
         constexpr void reset() noexcept
         {
             std::apply (
@@ -352,10 +360,6 @@ namespace PlayfulTones::DspToolbox::Graph
                 },
                 nodes_);
         }
-
-        //------------------------------------------------------------------
-        // State sharing detection
-        //------------------------------------------------------------------
 
         /**
          * @brief Check if any node in the graph needs separate state per channel.
@@ -379,10 +383,6 @@ namespace PlayfulTones::DspToolbox::Graph
                         typename std::tuple_element_t<Is, std::tuple<Nodes...>>::processor_type>()
                     || ...);
         }
-
-        //------------------------------------------------------------------
-        // Processing implementation
-        //------------------------------------------------------------------
 
         template <typename SampleType, std::size_t... Indices>
         constexpr void processImpl (BufferView<SampleType>& buffer, std::size_t sampleCount, std::index_sequence<Indices...>) noexcept
@@ -415,53 +415,37 @@ namespace PlayfulTones::DspToolbox::Graph
             std::get<NodeIndex> (nodes_).processor.process (nodeBuffer, sampleCount);
         }
 
-        //------------------------------------------------------------------
-        // Connection wiring
-        //------------------------------------------------------------------
-
         template <typename SampleType, std::size_t DestNodeIndex>
         constexpr void wireConnectionsToNode (BufferView<SampleType>& buffer, std::size_t sampleCount) noexcept
         {
-            // Iterate through all connections at compile time
-            wireConnectionsImpl<SampleType, DestNodeIndex> (buffer, sampleCount, std::make_index_sequence<NumConnections> {});
+            constexpr auto& connIndices = std::get<DestNodeIndex> (ConnectionLookup);
+            wirePreIndexedConnections<SampleType, DestNodeIndex> (
+                buffer, sampleCount, std::make_index_sequence<connIndices.size()> {});
         }
 
-        template <typename SampleType, std::size_t DestNodeIndex, std::size_t... ConnIndices>
-        constexpr void wireConnectionsImpl (BufferView<SampleType>& buffer, std::size_t sampleCount, std::index_sequence<ConnIndices...>) noexcept
+        template <typename SampleType, std::size_t DestNodeIndex, std::size_t... LocalIndices>
+        constexpr void wirePreIndexedConnections (
+            BufferView<SampleType>& buffer,
+            std::size_t sampleCount,
+            std::index_sequence<LocalIndices...>) noexcept
         {
-            (wireIfMatches<SampleType, DestNodeIndex, ConnIndices> (buffer, sampleCount), ...);
+            constexpr auto& connIndices = std::get<DestNodeIndex> (ConnectionLookup);
+            (wireConnection<SampleType, connIndices[LocalIndices]> (buffer, sampleCount), ...);
         }
 
-        template <typename SampleType, std::size_t DestNodeIndex, std::size_t ConnIndex>
-        constexpr void wireIfMatches (BufferView<SampleType>& buffer, std::size_t sampleCount) noexcept
+        template <typename SampleType, std::size_t ConnIndex>
+        constexpr void wireConnection (BufferView<SampleType>& buffer, std::size_t sampleCount) noexcept
         {
             constexpr auto conn = Connections[ConnIndex];
+            constexpr std::size_t sourceOffset = getChannelOffset<conn.sourceNode>();
+            constexpr std::size_t destOffset = getChannelOffset<conn.destNode>();
 
-            // Only wire if this connection's destination matches the current node
-            if constexpr (conn.destNode == DestNodeIndex)
-            {
-                constexpr std::size_t sourceOffset = getChannelOffsetForNode<conn.sourceNode> (std::make_index_sequence<NumNodes> {});
-                constexpr std::size_t destOffset = getChannelOffset<DestNodeIndex>();
+            SampleType* src = buffer.getWritePointer (sourceOffset + conn.sourceChannel);
+            SampleType* dst = buffer.getWritePointer (destOffset + conn.destChannel);
 
-                SampleType* src = buffer.getWritePointer (sourceOffset + conn.sourceChannel);
-                SampleType* dst = buffer.getWritePointer (destOffset + conn.destChannel);
-
-                simd::copy (dst, src, sampleCount);
-            }
-        }
-
-        template <std::size_t NodeIndex, std::size_t... Is>
-        static constexpr std::size_t getChannelOffsetForNode ([[maybe_unused]] std::index_sequence<Is...>) noexcept
-        {
-            std::size_t offset = 0;
-            ((Is < NodeIndex ? offset += std::tuple_element_t<Is, std::tuple<Nodes...>>::io_config::totalChannels : 0), ...);
-            return offset;
+            simd::copy (dst, src, sampleCount);
         }
     };
-
-    //----------------------------------------------------------------------
-    // Helper functions
-    //----------------------------------------------------------------------
 
     /**
      * @brief Wrap a processor in a Node.
@@ -503,10 +487,6 @@ namespace PlayfulTones::DspToolbox::Graph
     {
         return ConstexprGraph<Connections, Node<Processors>...> { Node<Processors> { std::move (processors) }... };
     }
-
-    //----------------------------------------------------------------------
-    // GraphProcessorState - Internal buffer for GraphProcessor
-    //----------------------------------------------------------------------
 
     /**
      * @brief Internal buffer state for GraphProcessor.
@@ -580,10 +560,6 @@ namespace PlayfulTones::DspToolbox::Graph
         }
     };
 
-    //----------------------------------------------------------------------
-    // GraphProcessor - Nested graph as processor
-    //----------------------------------------------------------------------
-
     /**
      * @brief Wraps a ConstexprGraph to be used as a processor node.
      *
@@ -648,20 +624,12 @@ namespace PlayfulTones::DspToolbox::Graph
         /** @brief Output channel mappings from ExternalIO */
         static constexpr auto OutputMappings = ExternalIO::outputMappings;
 
-        //------------------------------------------------------------------
-        // Construction
-        //------------------------------------------------------------------
-
         constexpr GraphProcessor() = default;
 
         constexpr explicit GraphProcessor (Graph graph) noexcept
             : graph_ (std::move (graph))
         {
         }
-
-        //------------------------------------------------------------------
-        // Processing
-        //------------------------------------------------------------------
 
         /**
          * @brief Process implementation for ProcessorBase.
@@ -697,10 +665,6 @@ namespace PlayfulTones::DspToolbox::Graph
             copyOutputs (internalBuffer, buffer, sampleCount);
         }
 
-        //------------------------------------------------------------------
-        // Reset
-        //------------------------------------------------------------------
-
         /**
          * @brief Reset processor state including nested graph.
          *
@@ -713,10 +677,6 @@ namespace PlayfulTones::DspToolbox::Graph
             // Reset nested graph
             graph_.reset();
         }
-
-        //------------------------------------------------------------------
-        // Nested processor access
-        //------------------------------------------------------------------
 
         /**
          * @brief Access a processor within the nested graph.
@@ -751,10 +711,6 @@ namespace PlayfulTones::DspToolbox::Graph
 
     private:
         Graph graph_ {};
-
-        //------------------------------------------------------------------
-        // Input/output copying
-        //------------------------------------------------------------------
 
         template <typename ExternalSampleType>
         constexpr void copyInputs (BufferView<ExternalSampleType>& external, BufferView<InternalSampleType>& internal, std::size_t sampleCount) noexcept
@@ -822,10 +778,6 @@ namespace PlayfulTones::DspToolbox::Graph
             return offset;
         }
     };
-
-    //----------------------------------------------------------------------
-    // Factory function
-    //----------------------------------------------------------------------
 
     /**
      * @brief Create a GraphProcessor wrapping a ConstexprGraph.
