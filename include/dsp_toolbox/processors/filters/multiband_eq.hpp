@@ -61,7 +61,7 @@ namespace PlayfulTones::DspToolbox::Processors
             descriptors[baseIndex + kBandFrequency] = ParamDescriptor {
                 "", // ID will be set at runtime if needed
                 "", // Name
-                20.0f, // Min
+                5.0f, // Min
                 20000.0f, // Max
                 1000.0f, // Default
                 "Hz" // Unit
@@ -82,7 +82,7 @@ namespace PlayfulTones::DspToolbox::Processors
                 "",
                 "",
                 0.0f,
-                7.0f,
+                9.0f,
                 static_cast<float> (BiquadType::Peak), // Default to Peak for middle bands
                 ""
             };
@@ -245,7 +245,7 @@ namespace PlayfulTones::DspToolbox::Processors
             if (band < NumBands)
             {
                 float const newValue = static_cast<float> (type);
-                if (this->state_.params.get (bandParamIndex (band, kBandType)) != newValue)
+                if (!Math::exactlyEquals (this->state_.params.get (bandParamIndex (band, kBandType)), newValue))
                 {
                     this->state_.params.set (bandParamIndex (band, kBandType), newValue);
                     this->state_.dirtyBands |= static_cast<std::uint8_t> (1u << band);
@@ -272,7 +272,7 @@ namespace PlayfulTones::DspToolbox::Processors
         {
             if (band < NumBands)
             {
-                if (this->state_.params.get (bandParamIndex (band, kBandFrequency)) != frequency)
+                if (!Math::exactlyEquals (this->state_.params.get (bandParamIndex (band, kBandFrequency)), frequency))
                 {
                     this->state_.params.set (bandParamIndex (band, kBandFrequency), frequency);
                     this->state_.dirtyBands |= static_cast<std::uint8_t> (1u << band);
@@ -299,7 +299,7 @@ namespace PlayfulTones::DspToolbox::Processors
         {
             if (band < NumBands)
             {
-                if (this->state_.params.get (bandParamIndex (band, kBandQ)) != q)
+                if (!Math::exactlyEquals (this->state_.params.get (bandParamIndex (band, kBandQ)), q))
                 {
                     this->state_.params.set (bandParamIndex (band, kBandQ), q);
                     this->state_.dirtyBands |= static_cast<std::uint8_t> (1u << band);
@@ -326,7 +326,7 @@ namespace PlayfulTones::DspToolbox::Processors
         {
             if (band < NumBands)
             {
-                if (this->state_.params.get (bandParamIndex (band, kBandGainDb)) != gainDb)
+                if (!Math::exactlyEquals (this->state_.params.get (bandParamIndex (band, kBandGainDb)), gainDb))
                 {
                     this->state_.params.set (bandParamIndex (band, kBandGainDb), gainDb);
                     this->state_.dirtyBands |= static_cast<std::uint8_t> (1u << band);
@@ -404,7 +404,7 @@ namespace PlayfulTones::DspToolbox::Processors
 
             // Coefficient hoisting: skip recalculation if parameters unchanged
             auto& cache = this->state_.paramCache[band];
-            if (cache.frequency == frequency && cache.q == q && cache.gainDb == gainDb && cache.type == type && cache.sampleRate == sampleRate)
+            if (Math::exactlyEquals (cache.frequency, frequency) && Math::exactlyEquals (cache.q, q) && Math::exactlyEquals (cache.gainDb, gainDb) && cache.type == type && Math::exactlyEquals (cache.sampleRate, sampleRate))
             {
                 return; // Parameters unchanged, coefficients still valid
             }
@@ -515,6 +515,46 @@ namespace PlayfulTones::DspToolbox::Processors
                     a1 = -2.0f * cosOmega;
                     a2 = 1.0f - alpha;
                     break;
+
+                case BiquadType::LowShelfSlope:
+                {
+                    float const A = Math::exp10_40 (gainDb);
+                    float const S = q; // Slope parameter
+                    float const sqrtArg = std::max (0.0f, (A + 1.0f / A) * (1.0f / S - 1.0f) + 2.0f);
+                    float const alphaSlope = sinOmega * 0.5f * Math::sqrt (sqrtArg);
+                    float const sqrtA = Math::sqrt (A);
+                    float const sqrtA_alpha_2 = 2.0f * sqrtA * alphaSlope;
+                    float const Ap1 = A + 1.0f;
+                    float const Am1 = A - 1.0f;
+
+                    b0 = A * ((Ap1 - (Am1 * cosOmega)) + sqrtA_alpha_2);
+                    b1 = 2.0f * A * ((Am1 - (Ap1 * cosOmega)));
+                    b2 = A * ((Ap1 - (Am1 * cosOmega)) - sqrtA_alpha_2);
+                    a0 = (Ap1 + (Am1 * cosOmega)) + sqrtA_alpha_2;
+                    a1 = -2.0f * ((Am1 + (Ap1 * cosOmega)));
+                    a2 = (Ap1 + (Am1 * cosOmega)) - sqrtA_alpha_2;
+                    break;
+                }
+
+                case BiquadType::HighShelfSlope:
+                {
+                    float const A = Math::exp10_40 (gainDb);
+                    float const S = q; // Slope parameter
+                    float const sqrtArg = std::max (0.0f, (A + 1.0f / A) * (1.0f / S - 1.0f) + 2.0f);
+                    float const alphaSlope = sinOmega * 0.5f * Math::sqrt (sqrtArg);
+                    float const sqrtA = Math::sqrt (A);
+                    float const sqrtA_alpha_2 = 2.0f * sqrtA * alphaSlope;
+                    float const Ap1 = A + 1.0f;
+                    float const Am1 = A - 1.0f;
+
+                    b0 = A * ((Ap1 + (Am1 * cosOmega)) + sqrtA_alpha_2);
+                    b1 = -2.0f * A * ((Am1 + (Ap1 * cosOmega)));
+                    b2 = A * ((Ap1 + (Am1 * cosOmega)) - sqrtA_alpha_2);
+                    a0 = (Ap1 - (Am1 * cosOmega)) + sqrtA_alpha_2;
+                    a1 = 2.0f * ((Am1 - (Ap1 * cosOmega)));
+                    a2 = (Ap1 - (Am1 * cosOmega)) - sqrtA_alpha_2;
+                    break;
+                }
             }
 
             // Normalize coefficients by a0

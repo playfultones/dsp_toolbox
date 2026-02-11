@@ -16,6 +16,32 @@ namespace PlayfulTones::DspToolbox::Math
 {
 
     /**
+     * @brief Exact floating-point equality comparison.
+     *
+     * Use this when you intentionally want to compare floating-point values
+     * for exact bit-pattern equality (e.g., checking for exactly 0.0 or 1.0
+     * in mathematical edge cases).
+     *
+     * @tparam T Floating-point type
+     * @param a First value
+     * @param b Second value
+     * @return true if a and b are exactly equal (same bit pattern)
+     */
+    template <typename T>
+        requires std::is_floating_point_v<T>
+    constexpr auto exactlyEquals (T a, T b) noexcept -> bool
+    {
+#if defined(__clang__) || defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+        return a == b;
+#if defined(__clang__) || defined(__GNUC__)
+    #pragma GCC diagnostic pop
+#endif
+    }
+
+    /**
  * @brief Constexpr absolute value.
  * @tparam T Floating-point type
  * @param x Input value
@@ -70,9 +96,17 @@ namespace PlayfulTones::DspToolbox::Math
         requires std::is_floating_point_v<T>
     constexpr auto sqrt (T x) noexcept -> T
     {
+        if (x != x) // NaN
+        {
+            return x;
+        }
         if (x <= T (0))
         {
             return T (0);
+        }
+        if (x == std::numeric_limits<T>::infinity())
+        {
+            return std::numeric_limits<T>::infinity();
         }
 
         // Initial guess using bit manipulation approximation
@@ -125,11 +159,19 @@ namespace PlayfulTones::DspToolbox::Math
         requires std::is_floating_point_v<T>
     constexpr auto exp (T x) noexcept -> T
     {
-        if (x > T (709))
+        if (x != x) // NaN
+        {
+            return x;
+        }
+
+        constexpr T overflowThreshold = std::is_same_v<T, float> ? T (88) : T (709);
+        constexpr T underflowThreshold = std::is_same_v<T, float> ? T (-88) : T (-709);
+
+        if (x > overflowThreshold)
         {
             return std::numeric_limits<T>::infinity();
         }
-        if (x < T (-709))
+        if (x < underflowThreshold)
         {
             return T (0);
         }
@@ -189,11 +231,19 @@ namespace PlayfulTones::DspToolbox::Math
         requires std::is_floating_point_v<T>
     constexpr auto log (T x) noexcept -> T
     {
+        if (x != x) // NaN
+        {
+            return x;
+        }
         if (x <= T (0))
         {
             return -std::numeric_limits<T>::infinity();
         }
-        if (x == T (1))
+        if (x == std::numeric_limits<T>::infinity())
+        {
+            return std::numeric_limits<T>::infinity();
+        }
+        if (exactlyEquals (x, T (1)))
         {
             return T (0);
         }
@@ -255,15 +305,15 @@ namespace PlayfulTones::DspToolbox::Math
         requires std::is_floating_point_v<T>
     constexpr auto pow (T base, T exponent) noexcept -> T
     {
-        if (exponent == T (0))
+        if (exactlyEquals (exponent, T (0)))
         {
             return T (1);
         }
-        if (base == T (0))
+        if (exactlyEquals (base, T (0)))
         {
             return exponent > T (0) ? T (0) : std::numeric_limits<T>::infinity();
         }
-        if (base == T (1))
+        if (exactlyEquals (base, T (1)))
         {
             return T (1);
         }
@@ -271,7 +321,7 @@ namespace PlayfulTones::DspToolbox::Math
         if (base < T (0))
         {
             T const intPart = floor (exponent);
-            if (exponent == intPart)
+            if (exactlyEquals (exponent, intPart))
             {
                 T const result = exp (exponent * log (-base));
                 auto const intExp = static_cast<long long> (intPart);
@@ -422,7 +472,7 @@ namespace PlayfulTones::DspToolbox::Math
         requires std::is_floating_point_v<T>
     constexpr auto atan (T x) noexcept -> T
     {
-        if (x == T (0))
+        if (exactlyEquals (x, T (0)))
         {
             return T (0);
         }

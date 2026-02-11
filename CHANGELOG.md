@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-02-11
+
+### Added
+
+- **Processors**
+  - `OnePole`: First-order IIR filter (6 dB/octave) with lowpass and highpass modes, bilinear transform coefficient design
+  - `Waveshaper`: Generic static nonlinear processor with concept-constrained transfer functions and zero-overhead inlining
+  - `Oversampler2x`: 2x oversampling wrapper with 12-tap half-band FIR anti-aliasing filter (~70 dB rejection), polyphase implementation
+  - `LookupTable`: Uniformly-spaced lookup table with cubic Hermite (Catmull-Rom) interpolation, linear interpolation, and nearest-neighbor modes
+
+- **Filter Types**
+  - `LowShelfSlope` and `HighShelfSlope` biquad types for slope-parameterized shelf filters (available in Biquad, MultibandEQ, and StereoMultibandEQ)
+
+### Changed
+
+- **Math Functions**: Added `exactlyEquals()` for explicit floating-point equality comparison, improved NaN and infinity handling in `sqrt`, `exp`, and `log`, added float-specific overflow/underflow thresholds for `exp`
+- **Filters**: Replaced raw `==`/`!=` float comparisons with `exactlyEquals()` across Biquad, MultibandEQ, StereoMultibandEQ, and StereoGain for correctness under `-Wfloat-equal`
+- **SmoothedValue**: Use `exactlyEquals` for floating-point target comparison
+- **IProcessor**: Use `exactlyEquals` for sample rate matching in `ProcessorWrapper`
+- **JUCE Integration**: Enable `GenericAudioProcessorEditor` in processor adapter
+
 ## [0.1.1] - 2026-01-14
 
 ### Changed

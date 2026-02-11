@@ -11,6 +11,7 @@
 #include "dsp_toolbox/core/crv.hpp"
 #include "dsp_toolbox/core/io_config.hpp"
 #include "dsp_toolbox/core/param.hpp"
+#include "dsp_toolbox/math/functions.hpp"
 #include "dsp_toolbox/processors/core/processor_base.hpp"
 #include "dsp_toolbox/processors/utilities/gain.hpp"
 #include "dsp_toolbox/simd/simd.hpp"
@@ -127,7 +128,7 @@ namespace PlayfulTones::DspToolbox::Processors
 
             // Convert to linear ONCE, then smooth in linear domain
             float const newLinearTarget = toLinearGain (Decibels<float> { dB }).value();
-            if (newLinearTarget != this->state_.linearGainTarget)
+            if (!Math::exactlyEquals (newLinearTarget, this->state_.linearGainTarget))
             {
                 this->state_.paramsNeedTick = true;
                 this->state_.linearGainTarget = newLinearTarget;

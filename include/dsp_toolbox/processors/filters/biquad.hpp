@@ -27,10 +27,12 @@ namespace PlayfulTones::DspToolbox::Processors
         Highpass = 1,
         Bandpass = 2,
         Peak = 3, ///< Parametric EQ band (uses gain)
-        LowShelf = 4, ///< Low frequency shelf (uses gain)
-        HighShelf = 5, ///< High frequency shelf (uses gain)
+        LowShelf = 4, ///< Low frequency shelf (uses gain, Q-based alpha)
+        HighShelf = 5, ///< High frequency shelf (uses gain, Q-based alpha)
         Notch = 6, ///< Band-reject filter
-        AllPass = 7 ///< Phase shift only, unity magnitude
+        AllPass = 7, ///< Phase shift only, unity magnitude
+        LowShelfSlope = 8, ///< Low frequency shelf (uses gain, slope S in Q slot)
+        HighShelfSlope = 9 ///< High frequency shelf (uses gain, slope S in Q slot)
     };
 
     /**
@@ -84,9 +86,9 @@ namespace PlayfulTones::DspToolbox::Processors
      * @brief Parameter descriptors for Biquad.
      */
     inline constexpr std::array<ParamDescriptor, kNumBiquadParams> BiquadParamDescriptors { {
-        { "frequency", "Frequency", 20.0f, 20000.0f, 1000.0f, "Hz" },
+        { "frequency", "Frequency", 5.0f, 20000.0f, 1000.0f, "Hz" },
         { "q", "Q", 0.1f, 20.0f, 0.707f, "" },
-        { "type", "Type", 0.0f, 7.0f, 0.0f, "" }, // 0-7 for all filter types
+        { "type", "Type", 0.0f, 9.0f, 0.0f, "" }, // 0-9 for all filter types
         { "gain_db", "Gain", -24.0f, 24.0f, 0.0f, "dB" } // For Peak, LowShelf, HighShelf
     } };
 
@@ -186,7 +188,7 @@ namespace PlayfulTones::DspToolbox::Processors
         constexpr void setType (BiquadType type) noexcept
         {
             float const newValue = static_cast<float> (type);
-            if (this->template getParam<kType>() != newValue)
+            if (!Math::exactlyEquals (this->template getParam<kType>(), newValue))
             {
                 this->template setParam<kType> (newValue);
                 this->state_.dirty = true;
@@ -206,7 +208,7 @@ namespace PlayfulTones::DspToolbox::Processors
          */
         constexpr void setFrequency (float frequency) noexcept
         {
-            if (this->template getParam<kFrequency>() != frequency)
+            if (!Math::exactlyEquals (this->template getParam<kFrequency>(), frequency))
             {
                 this->template setParam<kFrequency> (frequency);
                 this->state_.dirty = true;
@@ -229,7 +231,7 @@ namespace PlayfulTones::DspToolbox::Processors
          */
         constexpr void setQ (float q) noexcept
         {
-            if (this->template getParam<kQ>() != q)
+            if (!Math::exactlyEquals (this->template getParam<kQ>(), q))
             {
                 this->template setParam<kQ> (q);
                 this->state_.dirty = true;
@@ -252,7 +254,7 @@ namespace PlayfulTones::DspToolbox::Processors
          */
         constexpr void setGainDb (float gainDb) noexcept
         {
-            if (this->template getParam<kGainDb>() != gainDb)
+            if (!Math::exactlyEquals (this->template getParam<kGainDb>(), gainDb))
             {
                 this->template setParam<kGainDb> (gainDb);
                 this->state_.dirty = true;
@@ -275,7 +277,7 @@ namespace PlayfulTones::DspToolbox::Processors
         [[nodiscard]] constexpr bool usesGain() const noexcept
         {
             BiquadType const type = getType();
-            return type == BiquadType::Peak || type == BiquadType::LowShelf || type == BiquadType::HighShelf;
+            return type == BiquadType::Peak || type == BiquadType::LowShelf || type == BiquadType::HighShelf || type == BiquadType::LowShelfSlope || type == BiquadType::HighShelfSlope;
         }
 
         /**
@@ -377,7 +379,7 @@ namespace PlayfulTones::DspToolbox::Processors
 
             // Coefficient hoisting: skip recalculation if parameters unchanged
             auto& cache = this->state_.paramCache;
-            if (cache.frequency == frequency && cache.q == q && cache.gainDb == gainDb && cache.type == type && cache.sampleRate == sampleRate)
+            if (Math::exactlyEquals (cache.frequency, frequency) && Math::exactlyEquals (cache.q, q) && Math::exactlyEquals (cache.gainDb, gainDb) && cache.type == type && Math::exactlyEquals (cache.sampleRate, sampleRate))
             {
                 return; // Parameters unchanged, coefficients still valid
             }
@@ -489,6 +491,46 @@ namespace PlayfulTones::DspToolbox::Processors
                     a1 = -2.0f * cosOmega;
                     a2 = 1.0f - alpha;
                     break;
+
+                case BiquadType::LowShelfSlope:
+                {
+                    float const A = Math::exp10_40 (gainDb);
+                    float const S = q; // Slope parameter
+                    float const sqrtArg = std::max (0.0f, (A + 1.0f / A) * (1.0f / S - 1.0f) + 2.0f);
+                    float const alphaSlope = sinOmega * 0.5f * Math::sqrt (sqrtArg);
+                    float const sqrtA = Math::sqrt (A);
+                    float const sqrtA_alpha_2 = 2.0f * sqrtA * alphaSlope;
+                    float const Ap1 = A + 1.0f;
+                    float const Am1 = A - 1.0f;
+
+                    b0 = A * ((Ap1 - (Am1 * cosOmega)) + sqrtA_alpha_2);
+                    b1 = 2.0f * A * ((Am1 - (Ap1 * cosOmega)));
+                    b2 = A * ((Ap1 - (Am1 * cosOmega)) - sqrtA_alpha_2);
+                    a0 = (Ap1 + (Am1 * cosOmega)) + sqrtA_alpha_2;
+                    a1 = -2.0f * ((Am1 + (Ap1 * cosOmega)));
+                    a2 = (Ap1 + (Am1 * cosOmega)) - sqrtA_alpha_2;
+                    break;
+                }
+
+                case BiquadType::HighShelfSlope:
+                {
+                    float const A = Math::exp10_40 (gainDb);
+                    float const S = q; // Slope parameter
+                    float const sqrtArg = std::max (0.0f, (A + 1.0f / A) * (1.0f / S - 1.0f) + 2.0f);
+                    float const alphaSlope = sinOmega * 0.5f * Math::sqrt (sqrtArg);
+                    float const sqrtA = Math::sqrt (A);
+                    float const sqrtA_alpha_2 = 2.0f * sqrtA * alphaSlope;
+                    float const Ap1 = A + 1.0f;
+                    float const Am1 = A - 1.0f;
+
+                    b0 = A * ((Ap1 + (Am1 * cosOmega)) + sqrtA_alpha_2);
+                    b1 = -2.0f * A * ((Am1 + (Ap1 * cosOmega)));
+                    b2 = A * ((Ap1 + (Am1 * cosOmega)) - sqrtA_alpha_2);
+                    a0 = (Ap1 - (Am1 * cosOmega)) + sqrtA_alpha_2;
+                    a1 = 2.0f * ((Am1 - (Ap1 * cosOmega)));
+                    a2 = (Ap1 - (Am1 * cosOmega)) - sqrtA_alpha_2;
+                    break;
+                }
             }
 
             // Normalize coefficients by a0

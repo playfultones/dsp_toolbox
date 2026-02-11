@@ -8,6 +8,7 @@
 
 #include "dsp_toolbox/core/concepts.hpp"
 #include "dsp_toolbox/core/milliseconds.hpp"
+#include "dsp_toolbox/math/functions.hpp"
 
 #include <concepts>
 #include <cstddef>
@@ -60,7 +61,14 @@ namespace PlayfulTones::DspToolbox
          */
         constexpr void setTargetValue (T newValue) noexcept
         {
-            if (newValue == targetValue_)
+            if constexpr (std::floating_point<T>)
+            {
+                if (Math::exactlyEquals (newValue, targetValue_))
+                {
+                    return;
+                }
+            }
+            else if (newValue == targetValue_)
             {
                 return;
             }

@@ -183,8 +183,8 @@ namespace PlayfulTones::DspToolbox::Juce
         void setCurrentProgram (int /*index*/) override {}
         const juce::String getProgramName (int /*index*/) override { return {}; }
         void changeProgramName (int /*index*/, const juce::String& /*newName*/) override {}
-        bool hasEditor() const override { return false; }
-        juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+        bool hasEditor() const override { return true; }
+        juce::AudioProcessorEditor* createEditor() override { return new juce::GenericAudioProcessorEditor (*this); }
 
         /**
      * @brief Get APVTS for editor binding and state access.

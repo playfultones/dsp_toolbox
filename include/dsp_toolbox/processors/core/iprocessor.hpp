@@ -9,6 +9,7 @@
 #include "dsp_toolbox/core/buffer_view.hpp"
 #include "dsp_toolbox/core/constexpr_spec.hpp"
 #include "dsp_toolbox/core/process_spec.hpp"
+#include "dsp_toolbox/math/functions.hpp"
 #include "dsp_toolbox/processors/core/processor_base.hpp"
 
 #include <any>
@@ -43,10 +44,6 @@ namespace PlayfulTones::DspToolbox
     public:
         virtual ~IProcessor() = default;
 
-        //----------------------------------------------------------------------
-        // Core processing - called from audio thread
-        //----------------------------------------------------------------------
-
         /**
          * @brief Process audio samples in-place.
          *
@@ -58,10 +55,6 @@ namespace PlayfulTones::DspToolbox
          * @param buffer Audio buffer to process in-place
          */
         virtual void process (BufferView<float>& buffer) noexcept = 0;
-
-        //----------------------------------------------------------------------
-        // Lifecycle
-        //----------------------------------------------------------------------
 
         /**
          * @brief Prepare processor for playback.
@@ -80,10 +73,6 @@ namespace PlayfulTones::DspToolbox
          * without changing configuration. Called when playback stops or seeks.
          */
         virtual void reset() noexcept = 0;
-
-        //----------------------------------------------------------------------
-        // Introspection (optional overrides)
-        //----------------------------------------------------------------------
 
         /**
          * @brief Get processing latency in samples.
@@ -331,10 +320,6 @@ namespace PlayfulTones::DspToolbox
                 processor_);
         }
 
-        //----------------------------------------------------------------------
-        // Multi-spec specific API
-        //----------------------------------------------------------------------
-
         /**
          * @brief Check if a supported spec was found.
          *
@@ -425,7 +410,7 @@ namespace PlayfulTones::DspToolbox
             {
                 // Static spec: sample rate must match exactly
                 // Block size must be <= candidate's block size (can process smaller blocks)
-                if (spec.sampleRate.value == Candidate.sampleRate.value && spec.maxBlockSize.value <= Candidate.blockSize.value)
+                if (Math::exactlyEquals (spec.sampleRate.value, Candidate.sampleRate.value) && spec.maxBlockSize.value <= Candidate.blockSize.value)
                 {
                     processor_.template emplace<ProcessorTemplate<Candidate>>();
                     return true;
