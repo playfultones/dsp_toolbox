@@ -557,7 +557,6 @@ namespace PlayfulTones::DspToolbox::Processors
                 }
             }
 
-            // Normalize coefficients by a0
             float const invA0 = 1.0f / a0;
             this->state_.coeffs[band].b0 = b0 * invA0;
             this->state_.coeffs[band].b1 = b1 * invA0;

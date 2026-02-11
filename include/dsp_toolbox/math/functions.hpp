@@ -96,7 +96,7 @@ namespace PlayfulTones::DspToolbox::Math
         requires std::is_floating_point_v<T>
     constexpr auto sqrt (T x) noexcept -> T
     {
-        if (x != x) // NaN
+        if (!exactlyEquals (x, x)) // NaN
         {
             return x;
         }
@@ -104,12 +104,11 @@ namespace PlayfulTones::DspToolbox::Math
         {
             return T (0);
         }
-        if (x == std::numeric_limits<T>::infinity())
+        if (exactlyEquals (x, std::numeric_limits<T>::infinity()))
         {
             return std::numeric_limits<T>::infinity();
         }
 
-        // Initial guess using bit manipulation approximation
         T guess = x;
 
         // Scale for better convergence on extreme values
@@ -130,7 +129,6 @@ namespace PlayfulTones::DspToolbox::Math
 
         guess = scaledX * T (0.5);
 
-        // Newton-Raphson iterations
         constexpr int maxIterations = 20;
         for (int i = 0; i < maxIterations; ++i)
         {
@@ -159,7 +157,7 @@ namespace PlayfulTones::DspToolbox::Math
         requires std::is_floating_point_v<T>
     constexpr auto exp (T x) noexcept -> T
     {
-        if (x != x) // NaN
+        if (!exactlyEquals (x, x)) // NaN
         {
             return x;
         }
@@ -231,7 +229,7 @@ namespace PlayfulTones::DspToolbox::Math
         requires std::is_floating_point_v<T>
     constexpr auto log (T x) noexcept -> T
     {
-        if (x != x) // NaN
+        if (!exactlyEquals (x, x)) // NaN
         {
             return x;
         }
@@ -239,7 +237,7 @@ namespace PlayfulTones::DspToolbox::Math
         {
             return -std::numeric_limits<T>::infinity();
         }
-        if (x == std::numeric_limits<T>::infinity())
+        if (exactlyEquals (x, std::numeric_limits<T>::infinity()))
         {
             return std::numeric_limits<T>::infinity();
         }
@@ -286,7 +284,6 @@ namespace PlayfulTones::DspToolbox::Math
 
         result *= T (2);
 
-        // Add back the exponent contribution
         return result + static_cast<T> (exponent) * ln2<T>;
     }
 
@@ -606,7 +603,6 @@ namespace PlayfulTones::DspToolbox::Math
             sinX = -pi<T> - sinX;
         }
 
-        // Compute sin using Taylor series
         T const x2 = sinX * sinX;
         T sinResult = sinX;
         T term = sinX;

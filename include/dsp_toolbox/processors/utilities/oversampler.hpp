@@ -158,7 +158,10 @@ namespace PlayfulTones::DspToolbox::Processors
         InnerProcessor<UpsampledSpec2x<Spec>> innerProcessor {};
 
         /// Upsampled audio buffer: 1 channel, 2x block size
-        StaticAudioBuffer<1, Spec.blockSize.value * 2> upsampledBuffer {};
+        /// Uses std::max to ensure at least 1 sample for RuntimeSpec (blockSize == 0).
+        static constexpr std::size_t kUpsampledBlockSize =
+            Spec.blockSize.value > 0 ? Spec.blockSize.value * 2 : 1;
+        StaticAudioBuffer<1, kUpsampledBlockSize> upsampledBuffer {};
 
         /// Anti-aliasing FIR state for upsampling
         detail::HalfBandState upsampleFilter {};
