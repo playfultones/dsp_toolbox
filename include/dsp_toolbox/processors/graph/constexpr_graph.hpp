@@ -132,8 +132,6 @@ namespace PlayfulTones::DspToolbox::Graph
 
     namespace Detail
     {
-        // Helper to compute channel offset for a node at Index
-        // Uses constexpr lambda with fold expression for cleaner implementation
         template <typename NodesTuple, std::size_t Index>
         struct ChannelOffsetHelper
         {
@@ -157,14 +155,12 @@ namespace PlayfulTones::DspToolbox::Graph
             }
         };
 
-        // Helper to compute total channels
         template <typename... Nodes>
         struct TotalChannelsImpl
         {
             static constexpr std::size_t value = (Nodes::io_config::totalChannels + ... + 0);
         };
 
-        // Helper to compute max node channels (for temporary buffer)
         template <typename... Nodes>
         struct MaxNodeChannelsImpl;
 
@@ -182,7 +178,6 @@ namespace PlayfulTones::DspToolbox::Graph
             static constexpr std::size_t value = (firstChannels > restMax) ? firstChannels : restMax;
         };
 
-        // Check if a State type has shared = false (needs separate L/R processors)
         template <typename StateT>
         constexpr bool state_needs_separate_channels()
         {
@@ -193,7 +188,6 @@ namespace PlayfulTones::DspToolbox::Graph
             return false; // default: can share state
         }
 
-        // Check if a processor needs separate state per channel
         template <typename Processor>
         constexpr bool processor_needs_separate_state()
         {
@@ -204,7 +198,6 @@ namespace PlayfulTones::DspToolbox::Graph
             return false; // stateless processors can share
         }
 
-        // Count connections targeting a specific node (for pre-indexed lookup)
         template <auto Connections, std::size_t DestNode>
         constexpr std::size_t countConnectionsToNode()
         {
@@ -217,7 +210,6 @@ namespace PlayfulTones::DspToolbox::Graph
             return count;
         }
 
-        // Build array of connection indices for a specific destination node
         template <auto Connections, std::size_t DestNode>
         constexpr auto getConnectionIndicesForNode()
         {
@@ -232,7 +224,6 @@ namespace PlayfulTones::DspToolbox::Graph
             return indices;
         }
 
-        // Generate lookup table: tuple of arrays, one per node
         template <auto Connections, std::size_t... NodeIndices>
         constexpr auto makeConnectionLookupImpl (std::index_sequence<NodeIndices...>)
         {
@@ -378,7 +369,6 @@ namespace PlayfulTones::DspToolbox::Graph
         template <std::size_t... Is>
         static constexpr bool anyNodeNeedsSeparateStateImpl (std::index_sequence<Is...>) noexcept
         {
-            // Note: Node<P>::processor_type is the actual processor type
             return (Detail::processor_needs_separate_state<
                         typename std::tuple_element_t<Is, std::tuple<Nodes...>>::processor_type>()
                     || ...);
@@ -399,10 +389,8 @@ namespace PlayfulTones::DspToolbox::Graph
             constexpr std::size_t offset = getChannelOffset<NodeIndex>();
             constexpr std::size_t numChannels = IOConfig::totalChannels;
 
-            // Wire connections to this node before processing
             wireConnectionsToNode<SampleType, NodeIndex> (buffer, sampleCount);
 
-            // Create sub-view for this node
             std::array<SampleType*, numChannels> channelPtrs {};
             for (std::size_t ch = 0; ch < numChannels; ++ch)
             {
@@ -410,8 +398,6 @@ namespace PlayfulTones::DspToolbox::Graph
             }
 
             BufferView<SampleType> nodeBuffer (channelPtrs.data(), numChannels, sampleCount);
-
-            // Process the node
             std::get<NodeIndex> (nodes_).processor.process (nodeBuffer, sampleCount);
         }
 
@@ -561,6 +547,19 @@ namespace PlayfulTones::DspToolbox::Graph
     };
 
     /**
+     * @brief Resolve the effective maximum block size for static buffer allocation.
+     *
+     * For static specs, returns the compile-time block size.
+     * For RuntimeSpec (blockSize == 0), returns kRuntimeSpecMaxBlockSize to ensure
+     * internal buffers are large enough for any reasonable runtime block size.
+     *
+     * @tparam Spec The ConstexprSpec to resolve
+     */
+    template <ConstexprSpec Spec>
+    inline constexpr std::size_t kEffectiveMaxBlockSize =
+        Spec.blockSize.value > 0 ? Spec.blockSize.value : kRuntimeSpecMaxBlockSize;
+
+    /**
      * @brief Wraps a ConstexprGraph to be used as a processor node.
      *
      * GraphProcessor enables hierarchical graph composition by wrapping
@@ -612,11 +611,11 @@ namespace PlayfulTones::DspToolbox::Graph
     class GraphProcessor : public ProcessorBase<
                                GraphProcessor<ExternalIO, Graph, InternalSampleType>,
                                typename ExternalIO::IOConfig,
-                               GraphProcessorStateWithSharing<Graph, ExternalIO::Spec.blockSize.value, InternalSampleType>,
+                               GraphProcessorStateWithSharing<Graph, kEffectiveMaxBlockSize<ExternalIO::Spec>, InternalSampleType>,
                                ExternalIO::Spec>
     {
     public:
-        using StateType = GraphProcessorStateWithSharing<Graph, ExternalIO::Spec.blockSize.value, InternalSampleType>;
+        using StateType = GraphProcessorStateWithSharing<Graph, kEffectiveMaxBlockSize<ExternalIO::Spec>, InternalSampleType>;
 
         /** @brief Input channel mappings from ExternalIO */
         static constexpr auto InputMappings = ExternalIO::inputMappings;
@@ -643,6 +642,9 @@ namespace PlayfulTones::DspToolbox::Graph
         template <typename ExternalSampleType>
         constexpr void processImpl (BufferView<ExternalSampleType>& buffer, StateType& state, std::size_t sampleCount) noexcept
         {
+            assert (sampleCount <= kEffectiveMaxBlockSize<ExternalIO::Spec>
+                    && "Block size exceeds GraphProcessor static buffer capacity (kRuntimeSpecMaxBlockSize)");
+
             // Cache channel pointers on first use (avoid rebuilding each call)
             if (!state.ptrsCached)
             {
@@ -655,13 +657,8 @@ namespace PlayfulTones::DspToolbox::Graph
 
             BufferView<InternalSampleType> internalBuffer (state.channelPtrs.data(), Graph::TotalChannels, sampleCount);
 
-            // Copy inputs from external buffer to internal buffer
             copyInputs (buffer, internalBuffer, sampleCount);
-
-            // Process the nested graph
             graph_.process (internalBuffer, sampleCount);
-
-            // Copy outputs from internal buffer to external buffer
             copyOutputs (internalBuffer, buffer, sampleCount);
         }
 
@@ -672,9 +669,7 @@ namespace PlayfulTones::DspToolbox::Graph
          */
         constexpr void reset() noexcept
         {
-            // Reset internal buffer state
             this->state_.resetTransient();
-            // Reset nested graph
             graph_.reset();
         }
 

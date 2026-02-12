@@ -175,10 +175,11 @@ namespace PlayfulTones::DspToolbox::Processors
         /// The inner processor, instantiated at 2x sample rate/block size
         InnerProcessor<UpsampledSpec2x<Spec>> innerProcessor {};
 
-        /// Upsampled audio buffer: 1 channel, 2x block size
-        /// Uses std::max to ensure at least 1 sample for RuntimeSpec (blockSize == 0).
+        /// Upsampled audio buffer: 1 channel, 2x block size.
+        /// For RuntimeSpec (blockSize == 0), uses kRuntimeSpecMaxBlockSize as fallback
+        /// to ensure sufficient buffer space for any runtime block size.
         static constexpr std::size_t kUpsampledBlockSize =
-            Spec.blockSize.value > 0 ? Spec.blockSize.value * 2 : 1;
+            Spec.blockSize.value > 0 ? Spec.blockSize.value * 2 : kRuntimeSpecMaxBlockSize * 2;
         StaticAudioBuffer<1, kUpsampledBlockSize> upsampledBuffer {};
 
         /// Anti-aliasing FIR state for upsampling
@@ -297,6 +298,9 @@ namespace PlayfulTones::DspToolbox::Processors
         template <typename SampleType>
         constexpr void processImpl (BufferView<SampleType>& buffer, State& state, std::size_t sampleCount) noexcept
         {
+            assert (sampleCount * 2 <= State::kUpsampledBlockSize
+                    && "Block size exceeds RuntimeSpec static buffer capacity (kRuntimeSpecMaxBlockSize)");
+
             auto const* input = buffer.getReadPointer (0);
             auto* output = buffer.getWritePointer (0);
 

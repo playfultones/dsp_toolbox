@@ -62,15 +62,7 @@ namespace PlayfulTones::DspToolbox
         /** @brief Number of audio channels (1 = mono, 2 = stereo, etc.) */
         std::uint32_t numChannels { 2 };
 
-        //----------------------------------------------------------------------
-        // Comparison operators
-        //----------------------------------------------------------------------
-
         constexpr bool operator== (const ConstexprSpec& other) const noexcept = default;
-
-        //----------------------------------------------------------------------
-        // Conversion to ProcessSpec
-        //----------------------------------------------------------------------
 
         /**
          * @brief Convert ConstexprSpec to ProcessSpec for runtime use.
@@ -85,10 +77,6 @@ namespace PlayfulTones::DspToolbox
          */
         [[nodiscard]] constexpr auto toProcessSpec (bool allowDynamic = true, bool useSIMD = true) const noexcept;
     };
-
-    //--------------------------------------------------------------------------
-    // RuntimeSpec support for JUCE and other runtime-configured frameworks
-    //--------------------------------------------------------------------------
 
     /**
      * @brief Detect if a ConstexprSpec is the runtime sentinel value.
@@ -122,6 +110,21 @@ namespace PlayfulTones::DspToolbox
         .sampleRate = SampleRate { 0.0 }, // Sentinel: means "stored at runtime"
         .blockSize = Samples<std::uint32_t> { 0 }
     };
+
+    /**
+     * @brief Maximum block size for RuntimeSpec static buffer allocation.
+     *
+     * When processors are instantiated with RuntimeSpec, internal buffers
+     * (e.g. Oversampler2x upsampled buffer, GraphProcessorState scratch buffer)
+     * are sized at compile time. Since the actual block size is only known at
+     * runtime via prepareRuntime(), we use this fallback to allocate buffers
+     * large enough for any reasonable block size.
+     *
+     * Set to 8192 to cover all common DAW block sizes, including large buffers
+     * used during offline rendering. Memory cost is modest (~64KB per buffer
+     * channel) and RuntimeSpec variants are only instantiated as a fallback.
+     */
+    inline constexpr std::uint32_t kRuntimeSpecMaxBlockSize = 8192;
 
 } // namespace PlayfulTones::DspToolbox
 
