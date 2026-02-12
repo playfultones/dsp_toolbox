@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-02-12
+
+### Fixed
+
+- **Oversampler2x**: Redesign half-band FIR from 12-tap to 23-tap Parks-McClellan filter with correct frequency response — flat to 18 kHz at 48 kHz, normalized to unity DC gain (~45 dB stopband rejection)
+
 ## [0.2.1] - 2026-02-11
 
 ### Fixed
@@ -19,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Processors**
   - `OnePole`: First-order IIR filter (6 dB/octave) with lowpass and highpass modes, bilinear transform coefficient design
   - `Waveshaper`: Generic static nonlinear processor with concept-constrained transfer functions and zero-overhead inlining
-  - `Oversampler2x`: 2x oversampling wrapper with 12-tap half-band FIR anti-aliasing filter (~70 dB rejection), polyphase implementation
+  - `Oversampler2x`: 2x oversampling wrapper with half-band FIR anti-aliasing filter, polyphase implementation
   - `LookupTable`: Uniformly-spaced lookup table with cubic Hermite (Catmull-Rom) interpolation, linear interpolation, and nearest-neighbor modes
 
 - **Filter Types**

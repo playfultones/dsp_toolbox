@@ -61,7 +61,6 @@ namespace PlayfulTones::DspToolbox::Processors
         constexpr void prepare (double sampleRate, std::size_t /*blockSize*/) noexcept
         {
             params.prepare (sampleRate);
-            // 10ms smoothing time
             smoothingSteps = static_cast<std::size_t> (sampleRate * 0.01);
         }
 

@@ -84,7 +84,6 @@ namespace PlayfulTones::DspToolbox::Processors
     {
         ParamSet<OnePoleParamDescriptors> params;
 
-        // Transient state
         float z1 { 0.0f }; // y[n-1] for lowpass, or filter delay element
         OnePoleCoefficients coeffs {};
         OnePoleParamCache paramCache {};

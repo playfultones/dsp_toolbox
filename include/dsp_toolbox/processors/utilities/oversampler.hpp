@@ -25,44 +25,56 @@ namespace PlayfulTones::DspToolbox::Processors
         /**
          * @brief Half-band FIR filter coefficients for 2x oversampling.
          *
-         * 12-tap symmetric half-band FIR designed via Parks-McClellan
-         * (equiripple) method. Provides ~70 dB stopband rejection.
+         * 23-tap symmetric half-band FIR designed via Parks-McClellan
+         * (equiripple) method, normalized to unity DC gain.
+         * Provides ~45 dB stopband rejection.
          *
          * Half-band property: every other coefficient (except center) is zero.
          * This allows efficient polyphase implementation.
          *
          * Filter specs:
-         * - Order: 11 (12 taps)
-         * - Passband: 0 to 0.25 * fs (Nyquist of original rate)
-         * - Stopband: 0.25 * fs to 0.5 * fs
-         * - Rejection: ~70 dB
+         * - Order: 22 (23 taps)
+         * - Passband: 0 to 0.18 * fs_up (flat to < 0.1 dB)
+         * - Transition: 0.18 to 0.32 * fs_up
+         * - Stopband: 0.32 * fs_up to 0.5 * fs_up
+         * - Rejection: ~45 dB
+         * - DC gain: 1.0 (normalized)
+         *
+         * At 48 kHz source (96 kHz upsampled): flat to 18 kHz, -0.7 dB at 20 kHz
+         * At 44.1 kHz source (88.2 kHz upsampled): flat to 16 kHz, -2.2 dB at 20 kHz
          *
          * Non-zero coefficients (symmetric, only unique half listed):
-         * h[0] = h[11], h[2] = h[9], h[4] = h[7], h[5] = h[6] = 0.5 (center)
-         * h[1] = h[3] = h[8] = h[10] = 0 (half-band zeros)
+         * h[11] = center (single center tap)
+         * h[10] = h[12] = wing[0], h[8] = h[14] = wing[1], etc.
+         * All even-distance-from-center coefficients are zero (half-band zeros).
          */
         struct HalfBandCoeffs
         {
-            /// Non-zero wing coefficients: h[0], h[2], h[4]
-            /// (h[5]=h[6]=0.5 is the center tap pair, applied separately)
-            static constexpr std::array<float, 3> wing = {
-                -0.0244032f, // h[0] = h[11]
-                0.1384614f, // h[2] = h[9]
-                -0.6139127f // h[4] = h[7]  (large due to proximity to center)
+            /// Number of non-zero wing coefficient pairs (K = (N-3)/4 = 5)
+            static constexpr std::size_t numWings = 5;
+
+            /// Non-zero wing coefficients, innermost to outermost:
+            /// wing[k] corresponds to h[center-(2k+1)] = h[center+(2k+1)]
+            static constexpr std::array<float, numWings> wing = {
+                0.3120253f, // h[10] = h[12]  (offset 1 from center)
+                -0.0916125f, // h[8]  = h[14]  (offset 3)
+                0.0422511f, // h[6]  = h[16]  (offset 5)
+                -0.0197843f, // h[4]  = h[18]  (offset 7)
+                0.0081895f // h[2]  = h[20]  (offset 9)
             };
 
-            /// Center tap value (half-band: center = 0.5 for each polyphase arm)
-            static constexpr float center = 0.5f;
+            /// Center tap value (normalized, slightly below 0.5 for unity DC)
+            static constexpr float center = 0.4978618f;
 
             /// Total filter length (taps)
-            static constexpr std::size_t length = 12;
+            static constexpr std::size_t length = 23;
 
             /// Group delay in samples at the upsampled rate
-            static constexpr std::size_t groupDelay = (length - 1) / 2; // 5 at 2x rate
+            static constexpr std::size_t groupDelay = (length - 1) / 2; // 11 at 2x rate
 
             /// Group delay as seen at the original sample rate
             /// (ceil division since we decimate by 2)
-            static constexpr std::size_t groupDelayAtOriginalRate = (groupDelay + 1) / 2; // 3
+            static constexpr std::size_t groupDelayAtOriginalRate = (groupDelay + 1) / 2; // 6
         };
 
         /**
@@ -73,8 +85,7 @@ namespace PlayfulTones::DspToolbox::Processors
          */
         struct HalfBandState
         {
-            /// Delay line for polyphase filtering
-            /// We need (length - 1) delay elements
+            /// Delay line for the FIR filter
             std::array<float, HalfBandCoeffs::length> delayLine {};
             std::size_t writeIndex { 0 };
 
@@ -111,19 +122,26 @@ namespace PlayfulTones::DspToolbox::Processors
              * @brief Compute one output sample of the half-band filter.
              *
              * Exploits half-band symmetry: only non-zero taps are computed.
-             * h[1], h[3], h[8], h[10] = 0 (half-band zeros)
-             * h[5] = h[6] = 0.5 (center)
-             * h[0] = h[11], h[2] = h[9], h[4] = h[7] (wing symmetry)
+             * For N=23: center tap at h[11], wing pairs at odd offsets from center.
+             * Even-offset taps are zero (half-band property).
+             *
+             * read() offsets map h[i] to read(N-1-i):
+             *   center h[11] -> read(11)
+             *   wing[0] h[10],h[12] -> read(12),read(10)
+             *   wing[1] h[8],h[14]  -> read(14),read(8)
+             *   wing[2] h[6],h[16]  -> read(16),read(6)
+             *   wing[3] h[4],h[18]  -> read(18),read(4)
+             *   wing[4] h[2],h[20]  -> read(20),read(2)
              */
             [[nodiscard]] constexpr float computeOutput() const noexcept
             {
-                float output = 0.0f;
+                float output = HalfBandCoeffs::center * read (11);
 
-                output += HalfBandCoeffs::center * (read (5) + read (6));
-
-                output += HalfBandCoeffs::wing[0] * (read (0) + read (11));
-                output += HalfBandCoeffs::wing[1] * (read (2) + read (9));
-                output += HalfBandCoeffs::wing[2] * (read (4) + read (7));
+                output += HalfBandCoeffs::wing[0] * (read (12) + read (10));
+                output += HalfBandCoeffs::wing[1] * (read (14) + read (8));
+                output += HalfBandCoeffs::wing[2] * (read (16) + read (6));
+                output += HalfBandCoeffs::wing[3] * (read (18) + read (4));
+                output += HalfBandCoeffs::wing[4] * (read (20) + read (2));
 
                 return output;
             }
@@ -200,13 +218,13 @@ namespace PlayfulTones::DspToolbox::Processors
      * that has 2x the sample rate and 2x the block size of the outer spec.
      *
      * ## Half-band FIR
-     * Uses a 12-tap symmetric Parks-McClellan half-band filter with ~70 dB
+     * Uses a 23-tap symmetric Parks-McClellan half-band filter with ~45 dB
      * stopband rejection. The half-band structure means every other coefficient
      * is zero, reducing computation by ~50%.
      *
      * ## Latency
      * The oversampler introduces latency equal to the half-band FIR group delay
-     * (at the original sample rate): 3 samples. This is reported via
+     * (at the original sample rate): 6 samples. This is reported via
      * getLatencySamples().
      *
      * ## Usage
