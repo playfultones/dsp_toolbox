@@ -46,3 +46,8 @@ compile_commands.json
 /**/Temporary
 
 .DS_Store
+
+# Test artifacts
+tests/*.png
+tests/*.csv
+tests/__pycache__/
