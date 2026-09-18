@@ -311,11 +311,14 @@ namespace PlayfulTones::DspToolbox
         {
             return std::visit (
                 [] (const auto& proc) -> std::size_t {
-                    if constexpr (!std::is_same_v<std::decay_t<decltype (proc)>, std::monostate>)
+                    if constexpr (std::is_same_v<std::decay_t<decltype (proc)>, std::monostate>)
+                    {
+                        return 0;
+                    }
+                    else
                     {
                         return proc.getLatencySamples();
                     }
-                    return 0;
                 },
                 processor_);
         }
