@@ -14,6 +14,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
@@ -141,6 +142,19 @@ namespace PlayfulTones::DspToolbox::Processors
                 a2 = static_cast<float> (a2d * invA0);
             }
 
+            /**
+             * @brief Group delay in samples at normalized frequency omega (rad/sample).
+             */
+            [[nodiscard]] double groupDelay (double omega) const noexcept
+            {
+                // For P(z) = sum p_k z^-k: gd = Re(sum k p_k e^-jwk / sum p_k e^-jwk).
+                auto const gd = [omega] (double p0, double p1, double p2) {
+                    std::complex<double> const z1 = std::polar (1.0, -omega), z2 = z1 * z1;
+                    return std::real ((p1 * z1 + 2.0 * p2 * z2) / (p0 + p1 * z1 + p2 * z2));
+                };
+                return gd (b0, b1, b2) - gd (1.0, a1, a2);
+            }
+
             float processSample (float x) noexcept
             {
                 float const y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
@@ -191,6 +205,18 @@ namespace PlayfulTones::DspToolbox::Processors
             {
                 for (auto& s : sections)
                     s.reset();
+            }
+
+            /**
+             * @brief Group delay of the cascade in samples at the filter's rate.
+             */
+            [[nodiscard]] double groupDelay (double frequencyHz, double sampleRate) const noexcept
+            {
+                double const omega = 2.0 * 3.14159265358979323846 * frequencyHz / sampleRate;
+                double total = 0.0;
+                for (auto const& s : sections)
+                    total += s.groupDelay (omega);
+                return total;
             }
 
             /**
@@ -531,6 +557,17 @@ namespace PlayfulTones::DspToolbox::Processors
             return m_passthrough;
         }
 
+        /**
+         * @brief Input samples the stage waits for past an output's time.
+         *
+         * An output at input time t is produced once t <= consumed - wing - 1:
+         * Nz when upsampling, ceil(Nz / rho) when downsampling.
+         */
+        [[nodiscard]] std::size_t getFilterWingLength() const noexcept
+        {
+            return m_filterWingLen;
+        }
+
     private:
         /**
          * @brief Build the windowed-sinc lookup table.
@@ -856,6 +893,10 @@ namespace PlayfulTones::DspToolbox::Processors
             std::size_t const maxProcessingBlockSize = m_upResampler.getMaxOutputSamples (maxHostBlockSize);
             m_downResampler.prepare (processingRate, hostRate, maxProcessingBlockSize);
 
+            m_latencySamples = m_passthrough ? 0 : roundTripPadding (hostRate, processingRate,
+                                                       m_upResampler.getFilterWingLength(),
+                                                       m_downResampler.getFilterWingLength());
+
             // Anti-aliasing filter: when downsampling from a higher processing rate,
             // apply a steep lowpass at the target Nyquist to reject content that would
             // alias. This is critical when the processing contains nonlinear elements
@@ -902,25 +943,36 @@ namespace PlayfulTones::DspToolbox::Processors
         }
 
         /**
-         * @brief Get total latency in host-rate samples (up + down combined).
+         * @brief Round-trip latency of the two sinc stages, in host-rate samples.
+         *
+         * Each stage emits an output only once its filter's right wing has
+         * arrived (Resampler::getFilterWingLength), and processDown() pads the
+         * start of the stream so the round trip returns exactly as many
+         * samples as went in. That padding is the latency: an integer, e.g.
+         * 9 / 8 / 10 host samples at 44.1 / 48 / 88.2 kHz against 96 kHz.
+         *
+         * Not included: the anti-aliasing IIR's group delay, which depends on
+         * frequency (getAntiAliasingGroupDelay; about 1.4 / 1.3 / 0.4 host
+         * samples at 1 kHz for the rates above, a little more towards the top
+         * of the band).
          *
          * @return Latency in host-rate samples
          */
         [[nodiscard]] std::size_t getLatencySamples() const noexcept
         {
-            if (m_passthrough)
-                return 0;
+            return m_latencySamples;
+        }
 
-            // Up resampler latency is in processing-rate samples.
-            // Convert to host-rate: multiply by hostRate / processingRate.
-            std::size_t const upLatencyProcessingSamples = m_upResampler.getLatencySamples();
-            auto const upLatencyHostSamples = static_cast<std::size_t> (
-                std::round (static_cast<double> (upLatencyProcessingSamples) * m_hostRate / m_processingRate));
-
-            // Down resampler latency is already in host-rate samples (its output rate).
-            std::size_t const downLatencyHostSamples = m_downResampler.getLatencySamples();
-
-            return upLatencyHostSamples + downLatencyHostSamples;
+        /**
+         * @brief Group delay of the anti-aliasing IIR at one frequency, in
+         * host-rate samples (0 when the filter is inactive). Add it to
+         * getLatencySamples() for the round trip's total delay there.
+         */
+        [[nodiscard]] double getAntiAliasingGroupDelay (double frequencyHz) const noexcept
+        {
+            if (!m_antiAliasingFilter.active)
+                return 0.0;
+            return m_antiAliasingFilter.groupDelay (frequencyHz, m_processingRate) * m_hostRate / m_processingRate;
         }
 
         /**
@@ -1015,9 +1067,55 @@ namespace PlayfulTones::DspToolbox::Processors
         }
 
     private:
+        /**
+         * The largest shortfall of round-trip output against input, over
+         * every input count N: the stream padding processDown() inserts once
+         * a block boundary has landed on the worst phase of the rate ratio.
+         *
+         * Replays both stages' emission rule (an output at time t is due once
+         * t <= consumed - wing - 1, t stepping by 1 / rho) in the same double
+         * arithmetic as Resampler::process. The shortfall repeats every
+         * host / gcd(host, processing) input samples, except where outputs
+         * land exactly on the boundary: there the step's rounding decides,
+         * and only settles after a while (at 32 kHz, where every output does,
+         * the shortfall is 8 for the first ~50 input samples and 9 after).
+         * Hence the long replay.
+         */
+        static std::size_t roundTripPadding (double hostRate, double processingRate,
+            std::size_t upWing, std::size_t downWing) noexcept
+        {
+            double const upStep = 1.0 / (processingRate / hostRate);
+            double const downStep = 1.0 / (hostRate / processingRate);
+            auto const h = static_cast<std::int64_t> (std::llround (hostRate));
+            auto const p = static_cast<std::int64_t> (std::llround (processingRate));
+            // Several periods of the ratio, and long enough for the step's
+            // rounding to have settled which exact boundaries it misses.
+            auto const span = std::max<std::int64_t> (8192, static_cast<std::int64_t> (upWing) + 2
+                + (static_cast<std::int64_t> (downWing) + 2) * h / p + 4 * (h / std::gcd (h, p)));
+
+            double upTime = 0.0, downTime = 0.0;
+            std::int64_t up = 0, down = 0, worst = 0;
+            for (std::int64_t n = 1; n <= span; ++n)
+            {
+                while (upTime <= static_cast<double> (n) - static_cast<double> (upWing) - 1.0)
+                {
+                    ++up;
+                    upTime += upStep;
+                }
+                while (downTime <= static_cast<double> (up) - static_cast<double> (downWing) - 1.0)
+                {
+                    ++down;
+                    downTime += downStep;
+                }
+                worst = std::max (worst, n - down);
+            }
+            return static_cast<std::size_t> (worst);
+        }
+
         double m_hostRate { 0.0 };
         double m_processingRate { 0.0 };
         bool m_passthrough { true };
+        std::size_t m_latencySamples { 0 };
 
         Resampler m_upResampler; ///< Host rate -> processing rate
         Resampler m_downResampler; ///< Processing rate -> host rate

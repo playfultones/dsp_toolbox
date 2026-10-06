@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Oversampler2x**: `DecimationPhase` template parameter. `even` decimates on the even 2x sample for an integer latency of 11 original-rate samples; `odd` (the default) keeps the original output. `kLatencySamples` holds the exact value (10.5 odd, 11 even)
+- **ResamplerPair**: `getAntiAliasingGroupDelay(frequencyHz)`, the anti-aliasing IIR's group delay in host samples; **Resampler**: `getFilterWingLength()`
+
+### Fixed
+
+- **Oversampler2x**: declared latency was 6 samples; the filters delay by 10.5 (odd phase, reported as 11) or 11 (even phase). `HalfBandCoeffs::groupDelayAtOriginalRate` is removed
+- **ResamplerPair**: `getLatencySamples()` counts the sinc stages' hold-back exactly (9 / 8 / 10 host samples at 44.1 / 48 / 88.2 kHz against 96 kHz; it reported 6 / 6 / 8). The anti-aliasing IIR's fractional, frequency-dependent delay stays separate (`getAntiAliasingGroupDelay`)
+
 ## [0.2.4] - 2026-03-13
 
 ### Added

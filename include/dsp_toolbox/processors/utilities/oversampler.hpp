@@ -71,10 +71,6 @@ namespace PlayfulTones::DspToolbox::Processors
 
             /// Group delay in samples at the upsampled rate
             static constexpr std::size_t groupDelay = (length - 1) / 2; // 11 at 2x rate
-
-            /// Group delay as seen at the original sample rate
-            /// (ceil division since we decimate by 2)
-            static constexpr std::size_t groupDelayAtOriginalRate = (groupDelay + 1) / 2; // 6
         };
 
         /**
@@ -147,6 +143,28 @@ namespace PlayfulTones::DspToolbox::Processors
             }
         };
     } // namespace detail
+
+    /**
+     * @brief Which 2x-rate sample Oversampler2x decimates to.
+     *
+     * The anti-image and anti-alias half-band FIRs each delay by
+     * HalfBandCoeffs::groupDelay (11) samples at the 2x rate, 22 in total,
+     * counted from the even (first) 2x sample of each pair.
+     *
+     * - odd: the output is computed after pushing both samples of a pair, so
+     *   the decimator lands on the odd phase: 10.5 original-rate samples,
+     *   which no integer delay can match. The original behaviour, and the
+     *   default.
+     * - even: the output is computed after pushing the even sample and before
+     *   the odd one: exactly 11 original-rate samples. Same filters and inner
+     *   processing; only the output phase changes, which shows up as the
+     *   phase of the residual alias components near the top of the band.
+     */
+    enum class DecimationPhase
+    {
+        odd,
+        even
+    };
 
     /**
      * @brief Compute the upsampled ConstexprSpec (2x sample rate, 2x block size).
@@ -224,9 +242,11 @@ namespace PlayfulTones::DspToolbox::Processors
      * is zero, reducing computation by ~50%.
      *
      * ## Latency
-     * The oversampler introduces latency equal to the half-band FIR group delay
-     * (at the original sample rate): 6 samples. This is reported via
-     * getLatencySamples().
+     * Up and down filters together: 10.5 original-rate samples on the odd
+     * decimation phase, 11 on the even one (see DecimationPhase). The exact
+     * value is kLatencySamples; getLatencySamples() reports it rounded half
+     * up, so the odd phase reports 11 and leaves the output half a sample
+     * early against it.
      *
      * ## Usage
      * @code
@@ -240,16 +260,19 @@ namespace PlayfulTones::DspToolbox::Processors
      *
      * @tparam InnerProcessor Template taking ConstexprSpec, producing a processor
      * @tparam Spec Compile-time configuration (original sample rate)
+     * @tparam Phase Decimation phase; odd keeps the original output
      */
-    template <template <ConstexprSpec> typename InnerProcessor, ConstexprSpec Spec = DefaultSpec>
+    template <template <ConstexprSpec> typename InnerProcessor,
+        ConstexprSpec Spec = DefaultSpec,
+        DecimationPhase Phase = DecimationPhase::odd>
     class Oversampler2x : public ProcessorBase<
-                              Oversampler2x<InnerProcessor, Spec>,
+                              Oversampler2x<InnerProcessor, Spec, Phase>,
                               IOConfig<1, 1, 0, 0>,
                               Oversampler2xState<InnerProcessor, Spec>,
                               Spec>
     {
         using Base = ProcessorBase<
-            Oversampler2x<InnerProcessor, Spec>,
+            Oversampler2x<InnerProcessor, Spec, Phase>,
             IOConfig<1, 1, 0, 0>,
             Oversampler2xState<InnerProcessor, Spec>,
             Spec>;
@@ -259,14 +282,18 @@ namespace PlayfulTones::DspToolbox::Processors
 
         /// Processor template alias for StereoExpander and ProcessorWrapper
         template <ConstexprSpec S>
-        using Processor = Oversampler2x<InnerProcessor, S>;
+        using Processor = Oversampler2x<InnerProcessor, S, Phase>;
+
+        /// Exact latency in original-rate samples: 10.5 (odd) or 11 (even).
+        static constexpr double kLatencySamples =
+            static_cast<double> (detail::HalfBandCoeffs::groupDelay) - (Phase == DecimationPhase::odd ? 0.5 : 0.0);
 
         /**
-         * @brief Default constructor — reports latency.
+         * @brief Default constructor — reports latency (kLatencySamples rounded half up).
          */
         constexpr Oversampler2x() noexcept
         {
-            this->setLatency (detail::HalfBandCoeffs::groupDelayAtOriginalRate);
+            this->setLatency (static_cast<std::size_t> (kLatencySamples + 0.5));
         }
 
         /**
@@ -293,7 +320,7 @@ namespace PlayfulTones::DspToolbox::Processors
          * Steps:
          * 1. Upsample: zero-stuff input and apply anti-image FIR
          * 2. Process upsampled buffer through inner processor
-         * 3. Downsample: apply anti-alias FIR and decimate
+         * 3. Downsample: apply anti-alias FIR and decimate on Phase
          */
         template <typename SampleType>
         constexpr void processImpl (BufferView<SampleType>& buffer, State& state, std::size_t sampleCount) noexcept
@@ -324,9 +351,11 @@ namespace PlayfulTones::DspToolbox::Processors
             for (std::size_t i = 0; i < sampleCount; ++i)
             {
                 state.downsampleFilter.push (upsampledData[i * 2]);
+                if constexpr (Phase == DecimationPhase::even)
+                    output[i] = static_cast<SampleType> (state.downsampleFilter.computeOutput());
                 state.downsampleFilter.push (upsampledData[i * 2 + 1]);
-
-                output[i] = static_cast<SampleType> (state.downsampleFilter.computeOutput());
+                if constexpr (Phase == DecimationPhase::odd)
+                    output[i] = static_cast<SampleType> (state.downsampleFilter.computeOutput());
             }
         }
     };
